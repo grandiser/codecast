@@ -16,8 +16,10 @@
       "noUncheckedIndexedAccess": true,
       "esModuleInterop": true,
       "skipLibCheck": true,
-      "moduleResolution": "node16",
+      "moduleResolution": "nodenext",
       "rootDir": ".",
-      "outDir": "./dist"
+      "outDir": "./dist",
+      "jsx": "react-jsx",
+      "jsxImportSource": "react"
     }
   }

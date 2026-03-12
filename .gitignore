@@ -1,1 +1,7 @@
 PLAN.md
+.claude
+client/node_modules
+client/dist/
+node_modules/
+last_event.json
+image.png
