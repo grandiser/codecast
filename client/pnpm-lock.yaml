@@ -1,0 +1,41 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+overrides:
+  codecast: link:../../../AppData/Local/pnpm/global/5/node_modules/codecast
+
+importers:
+
+  .:
+    dependencies:
+      codecast:
+        specifier: link:../../../AppData/Local/pnpm/global/5/node_modules/codecast
+        version: link:../../../AppData/Local/pnpm/global/5/node_modules/codecast
+      pnpm:
+        specifier: ^10.32.1
+        version: 10.32.1
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+packages:
+
+  pnpm@10.32.1:
+    resolution: {integrity: sha512-pwaTjw6JrBRWtlY+q07fHR+vM2jRGR/FxZeQ6W3JGORFarLmfWE94QQ9LoyB+HMD5rQNT/7KnfFe8a1Wc0jyvg==}
+    engines: {node: '>=18.12'}
+    hasBin: true
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+snapshots:
+
+  pnpm@10.32.1: {}
+
+  typescript@5.9.3: {}
