@@ -1,0 +1,14 @@
+{
+  "name": "codecast",
+  "version": "1.0.0",
+  "description": "See your team code, in real-time",
+  "bin": {
+    "codecast": "./client/dist/index.js"
+  },
+  "scripts": {
+    "build": "cd client && npx tsc",
+    "dev": "cd client && npx tsc -w",
+    "postinstall": "cd client && pnpm install && npx tsc"
+  },
+  "license": "ISC"
+}

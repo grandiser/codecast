@@ -20,13 +20,12 @@ See your team code, in real-time. Watch Claude Code prompts, tool calls, and fil
 
 ```bash
 git clone https://github.com/grandiser/codecast.git
-cd codecast/client
+cd codecast
 pnpm install
-npx tsc
 pnpm link --global
 ```
 
-This gives you the `codecast` command globally.
+That's it. The `codecast` command is now available globally.
 
 ## Usage
 
