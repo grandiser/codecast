@@ -587,6 +587,7 @@ const useHandlers = () => {
   // Color assignment: self = cyan, others get unique colors from pool
   const colorMap = useRef(new Map<string, UserColor>());
   const nextColorIdx = useRef(0);
+  const intentionalClose = useRef(false);
 
   const getUser = useCallback((name: string): User => {
     const avatar = getAvatar(name);
@@ -677,7 +678,12 @@ const useHandlers = () => {
     });
 
     ws.on("close", () => {
-      addMessage({ type: "system", text: "Disconnected from server" });
+      if (intentionalClose.current) {
+        intentionalClose.current = false;
+        return;
+      }
+      addMessage({ type: "system", text: "Session ended by host. Exiting..." });
+      setTimeout(() => process.exit(0), 2000);
     });
   }, [addMessage, getUser]);
 
@@ -775,6 +781,7 @@ const useHandlers = () => {
 
   const handleEnd = useCallback(() => {
     if (socket) {
+      intentionalClose.current = true;
       socket.close();
       setSocket(null);
     }
