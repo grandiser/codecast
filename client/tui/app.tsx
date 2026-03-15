@@ -55,7 +55,7 @@ const ASCII_LOGO = `
 const COMMANDS = [
   { name: "/end", desc: "leave room" },
   { name: "/export", desc: "save chat to file" },
-  { name: "/filter", desc: "toggle tool visibility (e.g. /filter Read Edit)" },
+  { name: "/filter", desc: "toggle tool call visibility" },
   { name: "/help", desc: "show commands" },
   { name: "/quit", desc: "exit codecast" },
 ];
@@ -582,7 +582,7 @@ const useHandlers = () => {
   const [connectSubtitle, setConnectSubtitle] = useState("");
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [isHost, setIsHost] = useState(false);
-  const [hiddenTools, setHiddenTools] = useState<Set<string>>(new Set());
+  const [showToolCalls, setShowToolCalls] = useState(false);
 
   // Color assignment: self = cyan, others get unique colors from pool
   const colorMap = useRef(new Map<string, UserColor>());
@@ -834,38 +834,15 @@ const useHandlers = () => {
           handleExport();
           return;
         }
-        if (cmd === "filter" || cmd.startsWith("filter ")) {
-          const args = cmd.slice(6).trim().split(/\s+/).filter(Boolean);
-          if (args.length === 0) {
-            const hidden = [...hiddenTools];
-            const text = hidden.length === 0
-              ? "No filters active. Usage: /filter <tool> ... to toggle. Tools: Read, Edit, Write, Bash, Grep, Glob"
-              : `Hidden: ${hidden.join(", ")}. /filter <tool> to toggle, /filter clear to reset.`;
-            addMessage({ type: "system", text });
-            return;
-          }
-          if (args[0] === "clear") {
-            setHiddenTools(new Set());
-            addMessage({ type: "system", text: "All filters cleared." });
-            return;
-          }
-          const next = new Set(hiddenTools);
-          for (const raw of args) {
-            const tool = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
-            if (next.has(tool)) next.delete(tool);
-            else next.add(tool);
-          }
-          setHiddenTools(next);
-          const msg = next.size === 0
-            ? "All filters cleared."
-            : `Hidden: ${[...next].join(", ")}`;
-          addMessage({ type: "system", text: msg });
+        if (cmd === "filter") {
+          setShowToolCalls((prev) => !prev);
+          addMessage({ type: "system", text: showToolCalls ? "Tool calls hidden." : "Tool calls visible." });
           return;
         }
         if (cmd === "help") {
           addMessage({
             type: "system",
-            text: "Commands: /end (leave room), /export (save chat), /filter (toggle tool visibility), /help (this message), /quit (exit)",
+            text: "Commands: /end (leave room), /export (save chat), /filter (toggle tool calls), /help (this message), /quit (exit)",
           });
           return;
         }
@@ -880,7 +857,7 @@ const useHandlers = () => {
         socket.send(input);
       }
     },
-    [addMessage, handleEnd, handleExport, socket, hiddenTools]
+    [addMessage, handleEnd, handleExport, socket, showToolCalls]
   );
 
   return {
@@ -897,7 +874,7 @@ const useHandlers = () => {
     handleJoin,
     handleEnd,
     handleCommand,
-    hiddenTools,
+    showToolCalls,
   };
 };
 
@@ -925,14 +902,14 @@ const App: React.FC = () => {
     handleStart,
     handleJoin,
     handleCommand,
-    hiddenTools,
+    showToolCalls,
   } = useHandlers();
 
   const visibleMessages = useMemo(() =>
-    hiddenTools.size > 0
-      ? messages.filter((m) => !m.toolName || !hiddenTools.has(m.toolName))
-      : messages,
-    [messages, hiddenTools]
+    showToolCalls
+      ? messages
+      : messages.filter((m) => m.type !== "tool_call"),
+    [messages, showToolCalls]
   );
 
   const onWelcomeSelect = useCallback(
