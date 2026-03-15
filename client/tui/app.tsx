@@ -55,6 +55,7 @@ const ASCII_LOGO = `
 const COMMANDS = [
   { name: "/end", desc: "leave room" },
   { name: "/export", desc: "save chat to file" },
+  { name: "/filter", desc: "toggle tool visibility (e.g. /filter Read Edit)" },
   { name: "/help", desc: "show commands" },
   { name: "/quit", desc: "exit codecast" },
 ];
@@ -72,6 +73,7 @@ interface User {
 interface EventMessage {
   id: string;
   type: "join" | "leave" | "prompt" | "tool_call" | "file_edit" | "chat" | "system";
+  toolName?: string;
   user?: User;
   text: string;
   timestamp: Date;
@@ -592,6 +594,7 @@ const useHandlers = () => {
   const [connectSubtitle, setConnectSubtitle] = useState("");
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [isHost, setIsHost] = useState(false);
+  const [hiddenTools, setHiddenTools] = useState<Set<string>>(new Set());
 
   // Color assignment: self = cyan, others get unique colors from pool
   const colorMap = useRef(new Map<string, UserColor>());
@@ -643,7 +646,7 @@ const useHandlers = () => {
           const msgType = parsed.type === "tool_call" ? "tool_call"
             : parsed.type === "file_edit" ? "file_edit"
             : "prompt";
-          addMessage({ type: msgType, user, text: parsed.text, timestamp: now });
+          addMessage({ type: msgType, user, text: parsed.text, toolName: parsed.tool_name, timestamp: now });
           return;
         } catch {}
       }
@@ -659,7 +662,7 @@ const useHandlers = () => {
             const msgType = parsed.type === "tool_call" ? "tool_call"
               : parsed.type === "file_edit" ? "file_edit"
               : "prompt";
-            addMessage({ type: msgType, user, text: parsed.text, timestamp: now });
+            addMessage({ type: msgType, user, text: parsed.text, toolName: parsed.tool_name, timestamp: now });
             return;
           } catch {}
         }
@@ -867,10 +870,38 @@ const useHandlers = () => {
           handleExport();
           return;
         }
+        if (cmd === "filter" || cmd.startsWith("filter ")) {
+          const args = cmd.slice(6).trim().split(/\s+/).filter(Boolean);
+          if (args.length === 0) {
+            const hidden = [...hiddenTools];
+            const text = hidden.length === 0
+              ? "No filters active. Usage: /filter <tool> ... to toggle. Tools: Read, Edit, Write, Bash, Grep, Glob"
+              : `Hidden: ${hidden.join(", ")}. /filter <tool> to toggle, /filter clear to reset.`;
+            addMessage({ type: "system", text, timestamp: new Date() });
+            return;
+          }
+          if (args[0] === "clear") {
+            setHiddenTools(new Set());
+            addMessage({ type: "system", text: "All filters cleared.", timestamp: new Date() });
+            return;
+          }
+          const next = new Set(hiddenTools);
+          for (const raw of args) {
+            const tool = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+            if (next.has(tool)) next.delete(tool);
+            else next.add(tool);
+          }
+          setHiddenTools(next);
+          const msg = next.size === 0
+            ? "All filters cleared."
+            : `Hidden: ${[...next].join(", ")}`;
+          addMessage({ type: "system", text: msg, timestamp: new Date() });
+          return;
+        }
         if (cmd === "help") {
           addMessage({
             type: "system",
-            text: "Commands: /end (leave room), /export (save chat), /help (this message), /quit (exit)",
+            text: "Commands: /end (leave room), /export (save chat), /filter (toggle tool visibility), /help (this message), /quit (exit)",
             timestamp: new Date(),
           });
           return;
@@ -887,7 +918,7 @@ const useHandlers = () => {
         socket.send(input);
       }
     },
-    [addMessage, handleEnd, handleExport, socket]
+    [addMessage, handleEnd, handleExport, socket, hiddenTools]
   );
 
   return {
@@ -904,6 +935,7 @@ const useHandlers = () => {
     handleJoin,
     handleEnd,
     handleCommand,
+    hiddenTools,
   };
 };
 
@@ -931,7 +963,12 @@ const App: React.FC = () => {
     handleStart,
     handleJoin,
     handleCommand,
+    hiddenTools,
   } = useHandlers();
+
+  const visibleMessages = hiddenTools.size > 0
+    ? messages.filter((m) => !m.toolName || !hiddenTools.has(m.toolName))
+    : messages;
 
   const onWelcomeSelect = useCallback(
     (item: { value: string }) => {
@@ -985,7 +1022,7 @@ const App: React.FC = () => {
         <SessionScreen
           roomCode={roomCode}
           users={users}
-          messages={messages}
+          messages={visibleMessages}
           uptime={uptime}
           onInput={handleCommand}
         />

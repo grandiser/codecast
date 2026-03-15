@@ -56,7 +56,7 @@ async def send_event():
             text = f"Glob {tool_input.get('pattern', '?')}"
         else:
             text = f"{tool}"
-        message = json.dumps({"type": "tool_call", "user": user, "text": text})
+        message = json.dumps({"type": "tool_call", "user": user, "text": text, "tool_name": tool})
     else:
         return  # unknown hook type, skip
 
@@ -69,8 +69,13 @@ async def send_event():
             if auth != "__auth_ok__":
                 return
             await ws.send(message)
-    except Exception:
-        pass  # relay not running, silently skip
+    except Exception as e:
+        # Log errors for debugging — remove once stable
+        try:
+            with open("/tmp/codecast_hook_err.log", "a") as f:
+                f.write(f"{e.__class__.__name__}: {e}\n")
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     asyncio.run(send_event())
