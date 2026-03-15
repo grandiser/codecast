@@ -5,3 +5,7 @@ client/dist/
 node_modules/
 last_event.json
 image.png
+.DS_Store
+.opencode/
+.ruff_cache/
+pnpm-lock.yaml
