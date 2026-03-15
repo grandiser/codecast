@@ -7,6 +7,7 @@ import sys
 import json
 import asyncio
 import websockets
+from urllib.parse import quote
 
 async def send_event():
     # Room info is passed as command-line args by the hook command
@@ -16,6 +17,7 @@ async def send_event():
     room = sys.argv[1]
     host = sys.argv[2]       # "localhost:4001" or tunnel hostname
     user = sys.argv[3]
+    password = sys.argv[4] if len(sys.argv) > 4 else ""
 
     # Read event JSON from stdin
     raw = sys.stdin.read()
@@ -60,9 +62,12 @@ async def send_event():
 
     # Send to relay — use wss for remote hosts, ws for localhost
     protocol = "ws" if host.startswith("localhost") else "wss"
-    uri = f"{protocol}://{host}?room={room}&user={user}_hook"
+    uri = f"{protocol}://{host}?room={room}&user={user}_hook&password={quote(password, safe='')}"
     try:
         async with websockets.connect(uri) as ws:
+            auth = await asyncio.wait_for(ws.recv(), timeout=5)
+            if auth != "__auth_ok__":
+                return
             await ws.send(message)
     except Exception:
         pass  # relay not running, silently skip

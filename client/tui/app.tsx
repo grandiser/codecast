@@ -61,7 +61,7 @@ const COMMANDS = [
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-type Screen = "welcome" | "join" | "connecting" | "session" | "error";
+type Screen = "welcome" | "join" | "set-password" | "connecting" | "session" | "error";
 
 interface User {
   name: string;
@@ -175,10 +175,105 @@ const WelcomeScreen: React.FC<{
 // ─── Join Screen ────────────────────────────────────────────────────────────
 
 const JoinScreen: React.FC<{
-  onSubmit: (code: string) => void;
+  onSubmit: (code: string, password: string) => void;
   onBack: () => void;
 }> = ({ onSubmit, onBack }) => {
+  const [step, setStep] = useState<"code" | "password">("code");
   const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  useInput((_input, key) => {
+    if (key.escape) {
+      if (step === "password") {
+        setStep("code");
+        setPassword("");
+        setError("");
+      } else {
+        onBack();
+      }
+    }
+  });
+
+  const handleCodeSubmit = (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed.length < 4) {
+      setError("Room code must be at least 4 characters");
+      return;
+    }
+    setError("");
+    setCode(trimmed);
+    setStep("password");
+  };
+
+  const handlePasswordSubmit = (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed.length < 1) {
+      setError("Password cannot be empty");
+      return;
+    }
+    setError("");
+    onSubmit(code, trimmed);
+  };
+
+  return (
+    <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+      <BorderBox width={48}>
+        {step === "code" ? (
+          <>
+            <Text bold color="cyan">
+              Enter Room Code
+            </Text>
+            <Box marginTop={1}>
+              <Text color="cyan">{"> "}</Text>
+              <TextInput
+                value={code}
+                onChange={setCode}
+                onSubmit={handleCodeSubmit}
+                placeholder="room code..."
+              />
+            </Box>
+          </>
+        ) : (
+          <>
+            <Text bold color="cyan">
+              Enter Room Password
+            </Text>
+            <Box marginTop={1}>
+              <Text dimColor>Room: {code}</Text>
+            </Box>
+            <Box marginTop={1}>
+              <Text color="cyan">{"> "}</Text>
+              <TextInput
+                value={password}
+                onChange={setPassword}
+                onSubmit={handlePasswordSubmit}
+                placeholder="password..."
+                mask="*"
+              />
+            </Box>
+          </>
+        )}
+        {error ? (
+          <Box marginTop={1}>
+            <Text color="red">{error}</Text>
+          </Box>
+        ) : null}
+        <Box marginTop={1}>
+          <Text dimColor>esc to go back</Text>
+        </Box>
+      </BorderBox>
+    </Box>
+  );
+};
+
+// ─── Password Set Screen (Host) ─────────────────────────────────────────────
+
+const PasswordSetScreen: React.FC<{
+  onSubmit: (password: string) => void;
+  onBack: () => void;
+}> = ({ onSubmit, onBack }) => {
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   useInput((_input, key) => {
@@ -187,8 +282,8 @@ const JoinScreen: React.FC<{
 
   const handleSubmit = (value: string) => {
     const trimmed = value.trim();
-    if (trimmed.length < 4) {
-      setError("Room code must be at least 4 characters");
+    if (trimmed.length < 1) {
+      setError("Password cannot be empty");
       return;
     }
     setError("");
@@ -199,15 +294,19 @@ const JoinScreen: React.FC<{
     <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
       <BorderBox width={48}>
         <Text bold color="cyan">
-          Enter Room Code
+          Set Room Password
         </Text>
+        <Box marginTop={1}>
+          <Text dimColor>Others will need this to join.</Text>
+        </Box>
         <Box marginTop={1}>
           <Text color="cyan">{"> "}</Text>
           <TextInput
-            value={code}
-            onChange={setCode}
+            value={password}
+            onChange={setPassword}
             onSubmit={handleSubmit}
-            placeholder="room code..."
+            placeholder="password..."
+            mask="*"
           />
         </Box>
         {error ? (
@@ -607,7 +706,7 @@ const useHandlers = () => {
     });
   }, [addMessage, getUser]);
 
-  const handleStart = useCallback(() => {
+  const handleStart = useCallback((password: string) => {
     setConnectSubtitle("Starting server...");
     setScreen("connecting");
     setIsHost(true);
@@ -621,16 +720,28 @@ const useHandlers = () => {
       let attempts = 0;
       const tryConnect = () => {
         attempts++;
-        const ws = joinRoomLocal(code);
+        const ws = joinRoomLocal(code, password);
 
         ws.on("open", () => {
-          setSocket(ws);
-          wireSocket(ws);
-          setMessages([]);
-          setUptime(0);
-          installHooks(process.cwd(), code);
-          addMessage({ type: "system", text: `Room ${fullCode} created`, timestamp: new Date() });
-          setScreen("session");
+          const authHandler = (data: any) => {
+            const text = data.toString();
+            if (text === "__auth_ok__") {
+              ws.off("message", authHandler);
+              setSocket(ws);
+              wireSocket(ws);
+              setMessages([]);
+              setUptime(0);
+              installHooks(process.cwd(), code, 'localhost:4001', password);
+              addMessage({ type: "system", text: `Room ${fullCode} created`, timestamp: new Date() });
+              setScreen("session");
+            } else if (text === "__auth_fail__") {
+              ws.off("message", authHandler);
+              ws.close();
+              setErrorMsg("Authentication failed");
+              setScreen("error");
+            }
+          };
+          ws.on("message", authHandler);
         });
 
         ws.on("error", () => {
@@ -656,23 +767,35 @@ const useHandlers = () => {
     });
   }, [addMessage, wireSocket]);
 
-  const handleJoin = useCallback((fullCode: string) => {
+  const handleJoin = useCallback((fullCode: string, password: string) => {
     setRoomCode(fullCode);
     setConnectSubtitle("Joining room...");
     setScreen("connecting");
     setIsHost(false);
 
     // joinRoom parses "code@host:port" or just "code"
-    const ws = joinRoom(fullCode);
+    const ws = joinRoom(fullCode, password);
     const { code: bareCode, host } = parseRoomCode(fullCode);
 
     ws.on("open", () => {
-      setSocket(ws);
-      wireSocket(ws);
-      installHooks(process.cwd(), bareCode, host);
-      setMessages([]);
-      setUptime(0);
-      setScreen("session");
+      const authHandler = (data: any) => {
+        const text = data.toString();
+        if (text === "__auth_ok__") {
+          ws.off("message", authHandler);
+          setSocket(ws);
+          wireSocket(ws);
+          installHooks(process.cwd(), bareCode, host, password);
+          setMessages([]);
+          setUptime(0);
+          setScreen("session");
+        } else if (text === "__auth_fail__") {
+          ws.off("message", authHandler);
+          ws.close();
+          setErrorMsg("Invalid room password");
+          setScreen("error");
+        }
+      };
+      ws.on("message", authHandler);
     });
 
     ws.on("error", (err: Error) => {
@@ -814,7 +937,7 @@ const App: React.FC = () => {
     (item: { value: string }) => {
       switch (item.value) {
         case "start":
-          handleStart();
+          setScreen("set-password");
           break;
         case "join":
           setScreen("join");
@@ -841,6 +964,13 @@ const App: React.FC = () => {
   switch (screen) {
     case "welcome":
       return <WelcomeScreen onSelect={onWelcomeSelect} />;
+    case "set-password":
+      return (
+        <PasswordSetScreen
+          onSubmit={handleStart}
+          onBack={() => setScreen("welcome")}
+        />
+      );
     case "join":
       return (
         <JoinScreen

@@ -32,17 +32,17 @@ export const parseRoomCode = (fullCode: string): { code: string; host: string } 
     return { code: fullCode.slice(0, atIdx), host: fullCode.slice(atIdx + 1) };
 };
 
-export const joinRoom = (fullCode: string): WebSocket => {
+export const joinRoom = (fullCode: string, password: string = ''): WebSocket => {
     const { code, host } = parseRoomCode(fullCode);
     const protocol = host.startsWith('localhost') ? 'ws' : 'wss';
-    const uri = `${protocol}://${host}?room=${code}&user=${username}`;
+    const uri = `${protocol}://${host}?room=${code}&user=${username}&password=${encodeURIComponent(password)}`;
     const ws = new WebSocket(uri);
     return ws;
 }
 
 // Host always connects locally — tunnel is only for remote joiners
-export const joinRoomLocal = (code: string): WebSocket => {
-    const uri = `ws://localhost:4001?room=${code}&user=${username}`;
+export const joinRoomLocal = (code: string, password: string = ''): WebSocket => {
+    const uri = `ws://localhost:4001?room=${code}&user=${username}&password=${encodeURIComponent(password)}`;
     const ws = new WebSocket(uri);
     return ws;
 }
@@ -110,7 +110,7 @@ interface ClaudeSettings {
 }
 
 // host is "localhost:4001" for hosts, or the tunnel hostname for remote joiners
-export const installHooks = (cwd: string, room: string, host: string = 'localhost:4001') => {
+export const installHooks = (cwd: string, room: string, host: string = 'localhost:4001', password: string = '') => {
     const claudeDir = join(cwd, '.claude');
     const settingsPath = join(claudeDir, 'settings.json');
 
@@ -126,8 +126,9 @@ export const installHooks = (cwd: string, room: string, host: string = 'localhos
 
     if (!settings.hooks) settings.hooks = {};
 
-    // Embed room/host/user directly in the command so each project is self-contained
-    const hookCommand = `cd ${serverPath} && uv run hook.py ${room} ${host} ${username}`;
+    // Embed room/host/user/password directly in the command so each project is self-contained
+    const escapedPassword = password.replace(/'/g, "'\\''");
+    const hookCommand = `cd ${serverPath} && uv run hook.py ${room} ${host} ${username} '${escapedPassword}'`;
 
     const codecastHook = {
         type: "command",
