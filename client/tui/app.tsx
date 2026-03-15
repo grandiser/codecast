@@ -4,6 +4,7 @@ import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import SelectInput from "ink-select-input";
 import { writeFileSync } from "fs";
+import { execSync } from "child_process";
 import { basename } from "path";
 import { generateRoomCode, joinRoom, parseRoomCode, startServer, stopServer, startTunnel, stopTunnel, username, installHooks, uninstallHooks } from "../lib/room.js";
 import type WebSocket from "ws";
@@ -47,12 +48,15 @@ const OTHER_COLORS = [
 type UserColor = "cyan" | (typeof OTHER_COLORS)[number];
 
 const ASCII_LOGO = `
- ___ ___   __| | ___  ___ __ _ ___| |_
-/ __/ _ \\ / _\` |/ _ \\/ __/ _\` / __| __|
-| (_| (_) | (_| |  __/ (_| (_| \\__ \\ |_
-\\___\\___/ \\__,_|\\___|\\___|\\__,_|___/\\__|`;
+ ██████╗ ██████╗ ██████╗ ███████╗ ██████╗ █████╗ ███████╗████████╗
+██╔════╝██╔═══██╗██╔══██╗██╔════╝██╔════╝██╔══██╗██╔════╝╚══██╔══╝
+██║     ██║   ██║██║  ██║█████╗  ██║     ███████║███████╗   ██║
+██║     ██║   ██║██║  ██║██╔══╝  ██║     ██╔══██║╚════██║   ██║
+╚██████╗╚██████╔╝██████╔╝███████╗╚██████╗██║  ██║███████║   ██║
+ ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝╚═╝  ╚═╝╚══════╝   ╚═╝`;
 
 const COMMANDS = [
+  { name: "/copy", desc: "copy room code to clipboard" },
   { name: "/end", desc: "leave room" },
   { name: "/export", desc: "save chat to file" },
   { name: "/filter", desc: "toggle tool call visibility" },
@@ -141,14 +145,14 @@ const WelcomeScreen: React.FC<{
   onSelect: (item: { value: string }) => void;
 }> = ({ onSelect }) => {
   const items = [
-    { label: "Start New Room", value: "start" },
+    { label: "New Room", value: "start" },
     { label: "Join Room", value: "join" },
     { label: "Quit", value: "quit" },
   ];
 
   return (
     <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
-      <BorderBox width={52}>
+      <BorderBox width={72}>
         <Text color="cyan" bold>
           {ASCII_LOGO}
         </Text>
@@ -469,7 +473,7 @@ const MessageFeed: React.FC<{ messages: EventMessage[] }> = ({ messages }) => {
 
 const InputBar: React.FC<{
   onSubmit: (text: string) => void;
-}> = ({ onSubmit }) => {
+}> = React.memo(({ onSubmit }) => {
   const [value, setValue] = useState("");
 
   const handleSubmit = (text: string) => {
@@ -508,7 +512,7 @@ const InputBar: React.FC<{
       </Box>
     </Box>
   );
-};
+});
 
 // ─── Session Screen ─────────────────────────────────────────────────────────
 
@@ -617,12 +621,27 @@ const useHandlers = () => {
 
   const MAX_MESSAGES = 500;
 
-  const addMessage = useCallback((msg: Omit<EventMessage, "id" | "timestamp"> & { timestamp?: Date }) => {
+  // Batch message updates to avoid starving keyboard input on Windows
+  const messageQueue = useRef<EventMessage[]>([]);
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushMessages = useCallback(() => {
+    flushTimer.current = null;
+    if (messageQueue.current.length === 0) return;
+    const batch = messageQueue.current;
+    messageQueue.current = [];
     setMessages((prev) => {
-      const next = [...prev, { ...msg, timestamp: msg.timestamp ?? new Date(), id: mkId() }];
+      const next = [...prev, ...batch];
       return next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
     });
   }, []);
+
+  const addMessage = useCallback((msg: Omit<EventMessage, "id" | "timestamp"> & { timestamp?: Date }) => {
+    messageQueue.current.push({ ...msg, timestamp: msg.timestamp ?? new Date(), id: mkId() });
+    if (!flushTimer.current) {
+      flushTimer.current = setTimeout(flushMessages, 50);
+    }
+  }, [flushMessages]);
 
   // Parse incoming server messages and update state
   const wireSocket = useCallback((ws: WebSocket) => {
@@ -837,6 +856,16 @@ const useHandlers = () => {
           handleEnd();
           process.exit(0);
         }
+        if (cmd === "copy") {
+          const clipCmd = process.platform === "win32" ? "clip" : process.platform === "darwin" ? "pbcopy" : "xclip -selection clipboard";
+          try {
+            execSync(clipCmd, { input: roomCode, stdio: ["pipe", "ignore", "ignore"] });
+            addMessage({ type: "system", text: `Room code copied: ${roomCode}` });
+          } catch {
+            addMessage({ type: "system", text: `Room code: ${roomCode}` });
+          }
+          return;
+        }
         if (cmd === "export") {
           handleExport();
           return;
@@ -849,7 +878,7 @@ const useHandlers = () => {
         if (cmd === "help") {
           addMessage({
             type: "system",
-            text: "Commands: /end (leave room), /export (save chat), /filter (toggle tool calls), /help (this message), /quit (exit)",
+            text: "Commands: /copy (copy room code), /end (leave room), /export (save chat), /filter (toggle tool calls), /help (this message), /quit (exit)",
           });
           return;
         }
@@ -867,6 +896,15 @@ const useHandlers = () => {
     [addMessage, handleEnd, handleExport, socket, showToolCalls]
   );
 
+  // Stable ref so InputBar never re-renders from upstream state changes.
+  // This prevents useInput unsubscribe/resubscribe cycles that drop
+  // keystrokes on Windows.
+  const handleCommandRef = useRef(handleCommand);
+  handleCommandRef.current = handleCommand;
+  const stableHandleCommand = useCallback((input: string) => {
+    handleCommandRef.current(input);
+  }, []);
+
   return {
     screen,
     setScreen,
@@ -880,7 +918,7 @@ const useHandlers = () => {
     handleStart,
     handleJoin,
     handleEnd,
-    handleCommand,
+    handleCommand: stableHandleCommand,
     showToolCalls,
   };
 };
@@ -889,6 +927,12 @@ const useHandlers = () => {
 
 const App: React.FC = () => {
   const { exit } = useApp();
+
+  // Keep stdin raw mode alive across all screens. Without this, the
+  // "connecting" screen (which has no input components) causes Ink to
+  // drop raw mode. On Windows, re-enabling it doesn't reliably resume
+  // the stdin readable listener, freezing input on the session screen.
+  useInput(() => {});
 
   // Clear terminal on resize to prevent ghost frames
   useEffect(() => {

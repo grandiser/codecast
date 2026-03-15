@@ -68,6 +68,10 @@ export const stopServer = () => {
 
 export const startTunnel = async (): Promise<string> => {
     tunnel = await localtunnel({ port: 4001 });
+    tunnel.on('error', () => {
+        // Silently handle tunnel errors (e.g. connection refused after initial setup).
+        // The app still works over LAN without the tunnel.
+    });
     // tunnel.url is like "https://abc-def.loca.lt"
     const host = new URL(tunnel.url).host;
     return host;
