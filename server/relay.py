@@ -29,7 +29,7 @@ async def handler(websocket):
     print(f"Server log: {user} connected to room: {room}")
     broadcast(room, f"{user} connected")
     async for message in websocket:
-        broadcast(room, message)
+        broadcast(room, f"{user}: {message}")
         print(f"Server log: Message sent by {user} in room: {room} : " + message)
 
     print(f"Server log: {user} dropped out of room: {room}")
@@ -43,7 +43,8 @@ async def handler(websocket):
 
 
 async def main():
-    async with websockets.serve(handler, "localhost", 4001) as server:
+    async with websockets.serve(handler, "0.0.0.0", 4001) as server:
+        print("Relay listening on 0.0.0.0:4001")
         await server.serve_forever()
 
 if __name__ == "__main__":

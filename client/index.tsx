@@ -1,17 +1,24 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import Counter from "./tui/app.js";
-import { render, Text } from "ink";
+import App from "./tui/app.js";
+import { render } from "ink";
+import { stopServer, stopTunnel, uninstallHooks } from "./lib/room.js";
 
-// Declaring the program
 const program = new Command();
 
-// Adding actions to the CLI
 program
-.description("Renders a TUI")
-.action(() => {
-    render(<Counter />)
-});
+  .description("Watch your team code, in real-time")
+  .action(() => {
+    process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+    const cleanup = () => {
+      stopTunnel();
+      stopServer();
+      uninstallHooks(process.cwd());
+    };
+    process.on("SIGINT", () => { cleanup(); process.exit(0); });
+    process.on("exit", cleanup);
+    render(<App />, { exitOnCtrlC: true });
+  });
 
 
 // Execute CLI with the args given
