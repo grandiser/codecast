@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Text, Box, useInput, useApp, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import SelectInput from "ink-select-input";
 import { writeFileSync } from "fs";
 import { basename } from "path";
-import { generateRoomCode, joinRoom, joinRoomLocal, parseRoomCode, startServer, stopServer, startTunnel, stopTunnel, username, installHooks, uninstallHooks } from "../lib/room.js";
+import { generateRoomCode, joinRoom, parseRoomCode, startServer, stopServer, startTunnel, stopTunnel, username, installHooks, uninstallHooks } from "../lib/room.js";
 import type WebSocket from "ws";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ interface User {
 
 interface EventMessage {
   id: string;
-  type: "join" | "leave" | "prompt" | "tool_call" | "file_edit" | "chat" | "system";
+  type: "join" | "leave" | "prompt" | "tool_call" | "chat" | "system";
   toolName?: string;
   user?: User;
   text: string;
@@ -391,18 +391,6 @@ const EventItem: React.FC<{ event: EventMessage }> = ({ event }) => {
         </Box>
       );
 
-    case "file_edit":
-      return (
-        <Box>
-          <Text dimColor>[{time}] </Text>
-          <Text color={event.user?.color} bold>
-            {event.user?.avatar} {event.user?.name}
-          </Text>
-          <Text dimColor> {"\u2192"} editing: </Text>
-          <Text color="yellow">{event.text}</Text>
-        </Box>
-      );
-
     case "chat":
       return (
         <Box>
@@ -626,88 +614,97 @@ const useHandlers = () => {
     return () => clearInterval(timer);
   }, [screen]);
 
-  const addMessage = useCallback((msg: Omit<EventMessage, "id">) => {
-    setMessages((prev) => [...prev, { ...msg, id: mkId() }]);
+  const MAX_MESSAGES = 500;
+
+  const addMessage = useCallback((msg: Omit<EventMessage, "id" | "timestamp"> & { timestamp?: Date }) => {
+    setMessages((prev) => {
+      const next = [...prev, { ...msg, timestamp: msg.timestamp ?? new Date(), id: mkId() }];
+      return next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
+    });
   }, []);
 
   // Parse incoming server messages and update state
   const wireSocket = useCallback((ws: WebSocket) => {
+    const handleHookJson = (parsed: any) => {
+      const user = getUser(parsed.user);
+      const type = parsed.type === "tool_call" ? "tool_call" as const : "prompt" as const;
+      addMessage({ type, user, text: parsed.text, toolName: parsed.tool_name });
+    };
+
+    const tryParseHook = (json: string): boolean => {
+      if (!json.startsWith("{")) return false;
+      try { handleHookJson(JSON.parse(json)); return true; } catch { return false; }
+    };
+
     ws.on("message", (data) => {
       const text = data.toString();
-      const now = new Date();
 
-      // Try parsing as JSON (from hook scripts)
-      if (text.startsWith("{")) {
-        try {
-          const parsed = JSON.parse(text);
-          // Hook sends: {"type": "prompt"|"tool_call", "user": "name", "text": "..."}
-          // The relay wraps it as "hookuser: {json}", so we get the inner JSON
-          const user = getUser(parsed.user);
-          const msgType = parsed.type === "tool_call" ? "tool_call"
-            : parsed.type === "file_edit" ? "file_edit"
-            : "prompt";
-          addMessage({ type: msgType, user, text: parsed.text, toolName: parsed.tool_name, timestamp: now });
-          return;
-        } catch {}
-      }
+      // Direct JSON from hook
+      if (tryParseHook(text)) return;
 
-      // Relay wraps hook messages as "user_hook: {json}" — unwrap them
+      // Relay wraps hook messages as "user_hook: {json}"
       const colonIdx = text.indexOf(": ");
-      if (colonIdx > 0) {
-        const afterColon = text.slice(colonIdx + 2);
-        if (afterColon.startsWith("{")) {
-          try {
-            const parsed = JSON.parse(afterColon);
-            const user = getUser(parsed.user);
-            const msgType = parsed.type === "tool_call" ? "tool_call"
-              : parsed.type === "file_edit" ? "file_edit"
-              : "prompt";
-            addMessage({ type: msgType, user, text: parsed.text, toolName: parsed.tool_name, timestamp: now });
-            return;
-          } catch {}
-        }
-      }
+      if (colonIdx > 0 && tryParseHook(text.slice(colonIdx + 2))) return;
 
-      // Server sends: "username connected"
       if (text.endsWith(" connected")) {
         const name = text.slice(0, -" connected".length);
-        // Skip hook user connections
         if (name.endsWith("_hook")) return;
         const user = getUser(name);
         setUsers((prev) =>
           prev.some((u) => u.name === name) ? prev : [...prev, user]
         );
-        addMessage({ type: "join", user, text: "", timestamp: now });
+        addMessage({ type: "join", user, text: "" });
         return;
       }
 
-      // Server sends: "username dropped out"
       if (text.endsWith(" dropped out")) {
         const name = text.slice(0, -" dropped out".length);
         if (name.endsWith("_hook")) return;
         const user = getUser(name);
         setUsers((prev) => prev.filter((u) => u.name !== name));
-        addMessage({ type: "leave", user, text: "", timestamp: now });
+        addMessage({ type: "leave", user, text: "" });
         return;
       }
 
-      // Server sends: "username: message text" (plain chat)
       if (colonIdx > 0) {
         const name = text.slice(0, colonIdx);
         const msg = text.slice(colonIdx + 2);
-        const user = getUser(name);
-        addMessage({ type: "chat", user, text: msg, timestamp: now });
+        addMessage({ type: "chat", user: getUser(name), text: msg });
         return;
       }
 
-      // Fallback — show as system message
-      addMessage({ type: "system", text, timestamp: now });
+      addMessage({ type: "system", text });
     });
 
     ws.on("close", () => {
-      addMessage({ type: "system", text: "Disconnected from server", timestamp: new Date() });
+      addMessage({ type: "system", text: "Disconnected from server" });
     });
   }, [addMessage, getUser]);
+
+  const setupAuth = useCallback((ws: WebSocket, opts: {
+    room: string; host: string; password: string;
+    onSuccess?: () => void; failMsg: string;
+  }) => {
+    const authHandler = (data: any) => {
+      const text = data.toString();
+      if (text === "__auth_ok__") {
+        ws.off("message", authHandler);
+        setSocket(ws);
+        wireSocket(ws);
+        installHooks(process.cwd(), opts.room, opts.host, opts.password);
+        setMessages([]);
+        setUptime(0);
+        opts.onSuccess?.();
+        setScreen("session");
+      } else if (text === "__auth_fail__") {
+        ws.off("message", authHandler);
+        ws.close();
+        setErrorMsg(opts.failMsg);
+        setScreen("error");
+      }
+    };
+    ws.on("message", authHandler);
+  }, [wireSocket, addMessage]);
 
   const handleStart = useCallback((password: string) => {
     setConnectSubtitle("Starting server...");
@@ -723,28 +720,14 @@ const useHandlers = () => {
       let attempts = 0;
       const tryConnect = () => {
         attempts++;
-        const ws = joinRoomLocal(code, password);
+        const ws = joinRoom(code, password);
 
         ws.on("open", () => {
-          const authHandler = (data: any) => {
-            const text = data.toString();
-            if (text === "__auth_ok__") {
-              ws.off("message", authHandler);
-              setSocket(ws);
-              wireSocket(ws);
-              setMessages([]);
-              setUptime(0);
-              installHooks(process.cwd(), code, 'localhost:4001', password);
-              addMessage({ type: "system", text: `Room ${fullCode} created`, timestamp: new Date() });
-              setScreen("session");
-            } else if (text === "__auth_fail__") {
-              ws.off("message", authHandler);
-              ws.close();
-              setErrorMsg("Authentication failed");
-              setScreen("error");
-            }
-          };
-          ws.on("message", authHandler);
+          setupAuth(ws, {
+            room: code, host: 'localhost:4001', password,
+            onSuccess: () => addMessage({ type: "system", text: `Room ${fullCode} created` }),
+            failMsg: "Authentication failed",
+          });
         });
 
         ws.on("error", () => {
@@ -759,16 +742,14 @@ const useHandlers = () => {
       tryConnect();
     };
 
-    // Start tunnel, then connect once we have the public URL
     setConnectSubtitle("Starting tunnel...");
     startTunnel().then((tunnelHost) => {
       connectToRelay(`${code}@${tunnelHost}`);
     }).catch(() => {
-      // Tunnel failed — fall back to local-only
       connectToRelay(code);
-      addMessage({ type: "system", text: "Tunnel failed — room is local-only (bore not installed?)", timestamp: new Date() });
+      addMessage({ type: "system", text: "Tunnel failed — room is local-only (localtunnel unavailable?)" });
     });
-  }, [addMessage, wireSocket]);
+  }, [addMessage, wireSocket, setupAuth]);
 
   const handleJoin = useCallback((fullCode: string, password: string) => {
     setRoomCode(fullCode);
@@ -776,36 +757,21 @@ const useHandlers = () => {
     setScreen("connecting");
     setIsHost(false);
 
-    // joinRoom parses "code@host:port" or just "code"
     const ws = joinRoom(fullCode, password);
     const { code: bareCode, host } = parseRoomCode(fullCode);
 
     ws.on("open", () => {
-      const authHandler = (data: any) => {
-        const text = data.toString();
-        if (text === "__auth_ok__") {
-          ws.off("message", authHandler);
-          setSocket(ws);
-          wireSocket(ws);
-          installHooks(process.cwd(), bareCode, host, password);
-          setMessages([]);
-          setUptime(0);
-          setScreen("session");
-        } else if (text === "__auth_fail__") {
-          ws.off("message", authHandler);
-          ws.close();
-          setErrorMsg("Invalid room password");
-          setScreen("error");
-        }
-      };
-      ws.on("message", authHandler);
+      setupAuth(ws, {
+        room: bareCode, host, password,
+        failMsg: "Invalid room password",
+      });
     });
 
     ws.on("error", (err: Error) => {
       setErrorMsg(`Could not connect: ${err.message}`);
       setScreen("error");
     });
-  }, [addMessage, wireSocket]);
+  }, [wireSocket, setupAuth]);
 
   const handleEnd = useCallback(() => {
     if (socket) {
@@ -841,8 +807,6 @@ const useHandlers = () => {
           return `[${time}] ${m.user?.name}: ${m.text}`;
         case "tool_call":
           return `[${time}] ${m.user?.name} -> ${m.text}`;
-        case "file_edit":
-          return `[${time}] ${m.user?.name} -> editing: ${m.text}`;
         case "system":
           return `[${time}] ${m.text}`;
         default:
@@ -851,7 +815,7 @@ const useHandlers = () => {
     });
     const filename = `codecast-${roomCode}-${Date.now()}.txt`;
     writeFileSync(filename, lines.join("\n") + "\n");
-    addMessage({ type: "system", text: `Chat exported to ${filename}`, timestamp: new Date() });
+    addMessage({ type: "system", text: `Chat exported to ${filename}` });
   }, [messages, roomCode, addMessage]);
 
   const handleCommand = useCallback(
@@ -877,12 +841,12 @@ const useHandlers = () => {
             const text = hidden.length === 0
               ? "No filters active. Usage: /filter <tool> ... to toggle. Tools: Read, Edit, Write, Bash, Grep, Glob"
               : `Hidden: ${hidden.join(", ")}. /filter <tool> to toggle, /filter clear to reset.`;
-            addMessage({ type: "system", text, timestamp: new Date() });
+            addMessage({ type: "system", text });
             return;
           }
           if (args[0] === "clear") {
             setHiddenTools(new Set());
-            addMessage({ type: "system", text: "All filters cleared.", timestamp: new Date() });
+            addMessage({ type: "system", text: "All filters cleared." });
             return;
           }
           const next = new Set(hiddenTools);
@@ -895,21 +859,19 @@ const useHandlers = () => {
           const msg = next.size === 0
             ? "All filters cleared."
             : `Hidden: ${[...next].join(", ")}`;
-          addMessage({ type: "system", text: msg, timestamp: new Date() });
+          addMessage({ type: "system", text: msg });
           return;
         }
         if (cmd === "help") {
           addMessage({
             type: "system",
             text: "Commands: /end (leave room), /export (save chat), /filter (toggle tool visibility), /help (this message), /quit (exit)",
-            timestamp: new Date(),
           });
           return;
         }
         addMessage({
           type: "system",
           text: `Unknown command: /${cmd}. Type /help for available commands.`,
-          timestamp: new Date(),
         });
         return;
       }
@@ -966,9 +928,12 @@ const App: React.FC = () => {
     hiddenTools,
   } = useHandlers();
 
-  const visibleMessages = hiddenTools.size > 0
-    ? messages.filter((m) => !m.toolName || !hiddenTools.has(m.toolName))
-    : messages;
+  const visibleMessages = useMemo(() =>
+    hiddenTools.size > 0
+      ? messages.filter((m) => !m.toolName || !hiddenTools.has(m.toolName))
+      : messages,
+    [messages, hiddenTools]
+  );
 
   const onWelcomeSelect = useCallback(
     (item: { value: string }) => {
@@ -984,7 +949,7 @@ const App: React.FC = () => {
           break;
       }
     },
-    [handleStart, setScreen, exit]
+    [setScreen, exit]
   );
 
   const onErrorSelect = useCallback(

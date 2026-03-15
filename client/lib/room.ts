@@ -16,10 +16,9 @@ export const username = userInfo().username;
 
 export const generateRoomCode = (length: number) => {
     let s = '';
-    Array.from({ length }).some(() => {
+    while (s.length < length) {
       s += Math.random().toString(36).slice(2);
-      return s.length >= length;
-    });
+    }
     return s.slice(0, length);
   };
 
@@ -35,16 +34,8 @@ export const parseRoomCode = (fullCode: string): { code: string; host: string } 
 export const joinRoom = (fullCode: string, password: string = ''): WebSocket => {
     const { code, host } = parseRoomCode(fullCode);
     const protocol = host.startsWith('localhost') ? 'ws' : 'wss';
-    const uri = `${protocol}://${host}?room=${code}&user=${username}&password=${encodeURIComponent(password)}`;
-    const ws = new WebSocket(uri);
-    return ws;
-}
-
-// Host always connects locally — tunnel is only for remote joiners
-export const joinRoomLocal = (code: string, password: string = ''): WebSocket => {
-    const uri = `ws://localhost:4001?room=${code}&user=${username}&password=${encodeURIComponent(password)}`;
-    const ws = new WebSocket(uri);
-    return ws;
+    const uri = `${protocol}://${host}?room=${encodeURIComponent(code)}&user=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+    return new WebSocket(uri);
 }
 
 export const startServer = () => {
@@ -55,10 +46,6 @@ export const startServer = () => {
     });
     serverProcess.on('error', () => {});
 }
-
-export const serverIsRunning = (): boolean => {
-    return serverProcess !== null && !serverProcess.killed;
-};
 
 export const stopServer = () => {
     if (serverProcess && serverProcess.pid) {
@@ -91,6 +78,12 @@ export const stopTunnel = () => {
         tunnel.close();
         tunnel = null;
     }
+};
+
+export const cleanupInfrastructure = () => {
+    stopTunnel();
+    stopServer();
+    uninstallHooks(process.cwd());
 };
 
 // ─── Hook management ────────────────────────────────────────────────────────
@@ -127,8 +120,8 @@ export const installHooks = (cwd: string, room: string, host: string = 'localhos
     if (!settings.hooks) settings.hooks = {};
 
     // Embed room/host/user/password directly in the command so each project is self-contained
-    const escapedPassword = password.replace(/'/g, "'\\''");
-    const hookCommand = `cd ${serverPath} && uv run hook.py ${room} ${host} ${username} '${escapedPassword}'`;
+    const esc = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
+    const hookCommand = `cd ${esc(serverPath)} && uv run hook.py ${esc(room)} ${esc(host)} ${esc(username)} ${esc(password)}`;
 
     const codecastHook = {
         type: "command",
