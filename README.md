@@ -36,7 +36,7 @@ cd your-project/
 codecast
 ```
 
-Select **Start New Room**. A room code like `abc123@some-random.loca.lt` will be generated. Share this code with your team.
+Select **Start New Room** and set a password. A room code like `abc123@some-random.loca.lt` will be generated. Share this code and password with your team.
 
 Claude Code hooks are automatically installed in the current project. Any prompts and tool calls in your Claude Code session will stream to the room.
 
@@ -47,18 +47,19 @@ cd your-project/
 codecast
 ```
 
-Select **Join Room** and paste the room code. Your Claude Code activity in this project will also be broadcast to the room.
+Select **Join Room**, paste the room code, and enter the room password. Your Claude Code activity in this project will also be broadcast to the room.
 
 ### Commands
 
 Inside a session:
 
-| Command   | Description      |
-|-----------|------------------|
-| `/end`    | Leave the room   |
-| `/export` | Save chat to file|
-| `/help`   | Show commands    |
-| `/quit`   | Exit codecast    |
+| Command    | Description                                          |
+|------------|------------------------------------------------------|
+| `/end`     | Leave the room                                       |
+| `/export`  | Save chat to file                                    |
+| `/filter`  | Toggle tool visibility (e.g. `/filter Read Edit`)    |
+| `/help`    | Show commands                                        |
+| `/quit`    | Exit codecast                                        |
 
 ## How it works
 
