@@ -14,7 +14,7 @@ async def send_event():
         return  # missing args, silently skip
 
     room = sys.argv[1]
-    port = int(sys.argv[2])
+    host = sys.argv[2]       # "localhost:4001" or tunnel hostname
     user = sys.argv[3]
 
     # Read event JSON from stdin
@@ -58,8 +58,9 @@ async def send_event():
     else:
         return  # unknown hook type, skip
 
-    # Send to relay
-    uri = f"ws://localhost:{port}?room={room}&user={user}_hook"
+    # Send to relay — use wss for remote hosts, ws for localhost
+    protocol = "ws" if host.startswith("localhost") else "wss"
+    uri = f"{protocol}://{host}?room={room}&user={user}_hook"
     try:
         async with websockets.connect(uri) as ws:
             await ws.send(message)

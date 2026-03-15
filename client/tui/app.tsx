@@ -5,7 +5,7 @@ import Spinner from "ink-spinner";
 import SelectInput from "ink-select-input";
 import { writeFileSync } from "fs";
 import { basename } from "path";
-import { generateRoomCode, joinRoom, joinRoomLocal, startServer, stopServer, startTunnel, stopTunnel, username, installHooks, uninstallHooks } from "../lib/room.js";
+import { generateRoomCode, joinRoom, joinRoomLocal, parseRoomCode, startServer, stopServer, startTunnel, stopTunnel, username, installHooks, uninstallHooks } from "../lib/room.js";
 import type WebSocket from "ws";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -664,12 +664,12 @@ const useHandlers = () => {
 
     // joinRoom parses "code@host:port" or just "code"
     const ws = joinRoom(fullCode);
-    const bareCode = fullCode.split("@")[0]!;
+    const { code: bareCode, host } = parseRoomCode(fullCode);
 
     ws.on("open", () => {
       setSocket(ws);
       wireSocket(ws);
-      installHooks(process.cwd(), bareCode);
+      installHooks(process.cwd(), bareCode, host);
       setMessages([]);
       setUptime(0);
       setScreen("session");

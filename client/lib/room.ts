@@ -62,9 +62,14 @@ export const serverIsRunning = (): boolean => {
 
 export const stopServer = () => {
     if (serverProcess && serverProcess.pid) {
-        // shell: true spawns a process tree — need to kill the whole tree on Windows
         try {
-            execSync(`taskkill /F /T /PID ${serverProcess.pid}`, { stdio: 'ignore' });
+            if (process.platform === 'win32') {
+                // shell: true spawns a process tree — need to kill the whole tree on Windows
+                execSync(`taskkill /F /T /PID ${serverProcess.pid}`, { stdio: 'ignore' });
+            } else {
+                // Kill the process group (shell: true spawns sh + child)
+                process.kill(-serverProcess.pid, 'SIGTERM');
+            }
         } catch {
             // already dead
         }
@@ -104,8 +109,8 @@ interface ClaudeSettings {
     [key: string]: unknown;
 }
 
-// Hooks always connect to localhost — they run on the host machine
-export const installHooks = (cwd: string, room: string, port: number = 4001) => {
+// host is "localhost:4001" for hosts, or the tunnel hostname for remote joiners
+export const installHooks = (cwd: string, room: string, host: string = 'localhost:4001') => {
     const claudeDir = join(cwd, '.claude');
     const settingsPath = join(claudeDir, 'settings.json');
 
@@ -121,8 +126,8 @@ export const installHooks = (cwd: string, room: string, port: number = 4001) => 
 
     if (!settings.hooks) settings.hooks = {};
 
-    // Embed room/port/user directly in the command so each project is self-contained
-    const hookCommand = `cd ${serverPath} && uv run hook.py ${room} ${port} ${username}`;
+    // Embed room/host/user directly in the command so each project is self-contained
+    const hookCommand = `cd ${serverPath} && uv run hook.py ${room} ${host} ${username}`;
 
     const codecastHook = {
         type: "command",
