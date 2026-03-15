@@ -48,7 +48,7 @@ export const joinRoomLocal = (code: string): WebSocket => {
 }
 
 export const startServer = () => {
-    serverProcess = spawn('uv run python relay.py', [], {
+    serverProcess = spawn('uv run relay.py', [], {
         cwd: serverDir,
         stdio: 'ignore',
         shell: true,
@@ -122,7 +122,7 @@ export const installHooks = (cwd: string, room: string, port: number = 4001) => 
     if (!settings.hooks) settings.hooks = {};
 
     // Embed room/port/user directly in the command so each project is self-contained
-    const hookCommand = `cd ${serverPath} && uv run python hook.py ${room} ${port} ${username}`;
+    const hookCommand = `cd ${serverPath} && uv run hook.py ${room} ${port} ${username}`;
 
     const codecastHook = {
         type: "command",

@@ -1,3 +1,6 @@
+# /// script
+# dependencies = ["websockets"]
+# ///
 """Claude Code hook script — reads event from stdin, sends to codecast relay."""
 
 import sys
