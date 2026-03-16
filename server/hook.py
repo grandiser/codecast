@@ -35,12 +35,20 @@ async def send_event():
     elif hook_type == "PostToolUse":
         tool = event.get("tool_name", "unknown")
         tool_input = event.get("tool_input", {})
+        additions = 0
+        deletions = 0
         # Build a short summary
         if tool == "Read":
             text = f"Read {tool_input.get('file_path', '?')}"
         elif tool == "Edit":
+            old = tool_input.get("old_string", "")
+            new = tool_input.get("new_string", "")
+            deletions = len(old.splitlines()) if old else 0
+            additions = len(new.splitlines()) if new else 0
             text = f"Edit {tool_input.get('file_path', '?')}"
         elif tool == "Write":
+            content = tool_input.get("content", "")
+            additions = len(content.splitlines()) if content else 0
             text = f"Write {tool_input.get('file_path', '?')}"
         elif tool == "Bash":
             cmd = tool_input.get("command", "?")
@@ -53,7 +61,11 @@ async def send_event():
             text = f"Glob {tool_input.get('pattern', '?')}"
         else:
             text = f"{tool}"
-        message = json.dumps({"type": "tool_call", "user": user, "text": text, "tool_name": tool})
+        msg = {"type": "tool_call", "user": user, "text": text, "tool_name": tool}
+        if additions or deletions:
+            msg["additions"] = additions
+            msg["deletions"] = deletions
+        message = json.dumps(msg)
     else:
         return  # unknown hook type, skip
 

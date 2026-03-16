@@ -1,6 +1,7 @@
 import { spawn, execSync, ChildProcess } from 'child_process';
 import { WebSocket } from 'ws';
 import { userInfo } from 'os';
+import { randomBytes } from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname, resolve, join } from 'path';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
@@ -15,11 +16,13 @@ let tunnel: localtunnel.Tunnel | null = null;
 export const username = userInfo().username;
 
 export const generateRoomCode = (length: number) => {
-    let s = '';
-    while (s.length < length) {
-      s += Math.random().toString(36).slice(2);
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    const bytes = randomBytes(length);
+    let code = '';
+    for (let i = 0; i < length; i++) {
+      code += chars[bytes[i]! % chars.length];
     }
-    return s.slice(0, length);
+    return code;
   };
 
 // Parse "code@host:port" or just "code" (defaults to localhost:4001)
@@ -38,13 +41,23 @@ export const joinRoom = (fullCode: string, password: string = ''): WebSocket => 
     return new WebSocket(uri);
 }
 
+export let serverError: string | null = null;
+
 export const startServer = () => {
+    serverError = null;
     serverProcess = spawn('uv run relay.py', [], {
         cwd: serverDir,
         stdio: 'ignore',
         shell: true,
     });
-    serverProcess.on('error', () => {});
+    serverProcess.on('error', (err) => {
+        serverError = `Relay server failed to start: ${err.message}`;
+    });
+    serverProcess.on('exit', (code) => {
+        if (code && code !== 0) {
+            serverError = `Relay server exited with code ${code}`;
+        }
+    });
 }
 
 export const stopServer = () => {

@@ -62,6 +62,7 @@ const COMMANDS = [
   { name: "/filter", desc: "toggle tool call visibility" },
   { name: "/help", desc: "show commands" },
   { name: "/quit", desc: "exit codecast" },
+  { name: "/stats", desc: "show user activity rankings" },
 ];
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -76,11 +77,13 @@ interface User {
 
 interface EventMessage {
   id: string;
-  type: "join" | "leave" | "prompt" | "tool_call" | "chat" | "system";
+  type: "join" | "leave" | "prompt" | "tool_call" | "chat" | "system" | "diff_summary";
   toolName?: string;
   user?: User;
   text: string;
   timestamp: Date;
+  additions?: number;
+  deletions?: number;
 }
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
@@ -205,6 +208,10 @@ const JoinScreen: React.FC<{
     const trimmed = value.trim();
     if (trimmed.length < 4) {
       setError("Room code must be at least 4 characters");
+      return;
+    }
+    if (trimmed.length > 128) {
+      setError("Room code is too long");
       return;
     }
     setError("");
@@ -392,6 +399,14 @@ const EventItem: React.FC<{ event: EventMessage }> = ({ event }) => {
           </Text>
           <Text dimColor> {"\u2192"} </Text>
           <Text>{truncateDisplay(event.text)}</Text>
+          {(event.additions || event.deletions) ? (
+            <>
+              <Text>  </Text>
+              {event.additions ? <Text color="green">+{event.additions}</Text> : null}
+              {event.additions && event.deletions ? <Text> </Text> : null}
+              {event.deletions ? <Text color="red">-{event.deletions}</Text> : null}
+            </>
+          ) : null}
         </Text>
       );
 
@@ -403,6 +418,20 @@ const EventItem: React.FC<{ event: EventMessage }> = ({ event }) => {
             {event.user?.avatar} {event.user?.name}
           </Text>
           <Text>: {truncateDisplay(event.text)}</Text>
+        </Text>
+      );
+
+    case "diff_summary":
+      return (
+        <Text>
+          <Text dimColor>[{time}] </Text>
+          <Text color={event.user?.color} bold>
+            {event.user?.avatar} {event.user?.name}
+          </Text>
+          <Text dimColor> done </Text>
+          {event.additions ? <Text color="green" bold>+{event.additions}</Text> : null}
+          {event.additions && event.deletions ? <Text> </Text> : null}
+          {event.deletions ? <Text color="red" bold>-{event.deletions}</Text> : null}
         </Text>
       );
 
@@ -649,6 +678,26 @@ const useHandlers = () => {
 
   const MAX_MESSAGES = 500;
 
+  // Per-user activity counters — always updated, independent of /filter
+  const statsMap = useRef(new Map<string, { prompts: number; toolCalls: number; additions: number; deletions: number }>());
+
+  // Accumulate line changes per user between prompts — flushed as diff_summary on next prompt
+  const pendingDiffs = useRef(new Map<string, { additions: number; deletions: number }>());
+
+  const trackStats = useCallback((msg: Omit<EventMessage, "id" | "timestamp">) => {
+    const name = msg.user?.name;
+    if (!name) return;
+    let entry = statsMap.current.get(name);
+    if (!entry) { entry = { prompts: 0, toolCalls: 0, additions: 0, deletions: 0 }; statsMap.current.set(name, entry); }
+    if (msg.type === "prompt") entry.prompts++;
+    else if (msg.type === "tool_call") {
+      entry.toolCalls++;
+      if (msg.additions) entry.additions += msg.additions;
+      if (msg.deletions) entry.deletions += msg.deletions;
+    }
+
+  }, []);
+
   // Batch message updates to avoid starving keyboard input on Windows
   const messageQueue = useRef<EventMessage[]>([]);
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -665,18 +714,37 @@ const useHandlers = () => {
   }, []);
 
   const addMessage = useCallback((msg: Omit<EventMessage, "id" | "timestamp"> & { timestamp?: Date }) => {
+    trackStats(msg);
     messageQueue.current.push({ ...msg, timestamp: msg.timestamp ?? new Date(), id: mkId() });
     if (!flushTimer.current) {
       flushTimer.current = setTimeout(flushMessages, 50);
     }
-  }, [flushMessages]);
+  }, [flushMessages, trackStats]);
 
   // Parse incoming server messages and update state
   const wireSocket = useCallback((ws: WebSocket) => {
     const handleHookJson = (parsed: any) => {
+      if (typeof parsed.user !== "string" || typeof parsed.text !== "string") return;
       const user = getUser(parsed.user);
-      const type = parsed.type === "tool_call" ? "tool_call" as const : "prompt" as const;
-      addMessage({ type, user, text: parsed.text, toolName: parsed.tool_name });
+      if (parsed.type === "tool_call") {
+        const additions = parsed.additions ?? 0;
+        const deletions = parsed.deletions ?? 0;
+        if (additions || deletions) {
+          const pending = pendingDiffs.current.get(parsed.user) ?? { additions: 0, deletions: 0 };
+          pending.additions += additions;
+          pending.deletions += deletions;
+          pendingDiffs.current.set(parsed.user, pending);
+        }
+        addMessage({ type: "tool_call", user, text: parsed.text, toolName: parsed.tool_name, additions: additions || undefined, deletions: deletions || undefined });
+      } else {
+        // prompt — flush pending diffs as a summary
+        const pending = pendingDiffs.current.get(parsed.user);
+        if (pending && (pending.additions || pending.deletions)) {
+          addMessage({ type: "diff_summary", user, text: "", additions: pending.additions, deletions: pending.deletions });
+          pendingDiffs.current.delete(parsed.user);
+        }
+        addMessage({ type: "prompt", user, text: parsed.text });
+      }
     };
 
     const tryParseHook = (json: string): boolean => {
@@ -846,6 +914,8 @@ const useHandlers = () => {
     uninstallHooks(process.cwd());
     colorMap.current.clear();
     nextColorIdx.current = 0;
+    statsMap.current.clear();
+    pendingDiffs.current.clear();
   }, [socket, isHost]);
 
   const handleExport = useCallback(() => {
@@ -868,7 +938,8 @@ const useHandlers = () => {
           return `[${time}] ${m.text}`;
       }
     });
-    const filename = `codecast-${roomCode}-${Date.now()}.txt`;
+    const safeCode = roomCode.replace(/[^a-zA-Z0-9._@-]/g, "_");
+    const filename = `codecast-${safeCode}-${Date.now()}.txt`;
     writeFileSync(filename, lines.join("\n") + "\n");
     addMessage({ type: "system", text: `Chat exported to ${filename}` });
   }, [messages, roomCode, addMessage]);
@@ -904,10 +975,36 @@ const useHandlers = () => {
           addMessage({ type: "system", text: showToolCalls ? "Tool calls hidden." : "Tool calls visible." });
           return;
         }
+        if (cmd === "stats") {
+          const entries = Array.from(statsMap.current.entries())
+            .map(([name, s]) => ({ name, total: s.prompts + s.toolCalls, ...s }))
+            .sort((a, b) => b.total - a.total);
+          if (entries.length === 0) {
+            addMessage({ type: "system", text: "No activity yet." });
+          } else {
+            const activityLines = entries.map((e, i) => {
+              const medal = i === 0 ? "\u{1F947}" : i === 1 ? "\u{1F948}" : i === 2 ? "\u{1F949}" : `#${i + 1}`;
+              return `${medal} ${e.name}  ${e.total} total \u2502 ${e.prompts} prompts \u2502 ${e.toolCalls} tool calls`;
+            });
+            const diffEntries = entries
+              .filter((e) => e.additions || e.deletions)
+              .sort((a, b) => (b.additions + b.deletions) - (a.additions + a.deletions));
+            const diffLines = diffEntries.map((e, i) => {
+              const medal = i === 0 ? "\u{1F947}" : i === 1 ? "\u{1F948}" : i === 2 ? "\u{1F949}" : `#${i + 1}`;
+              return `${medal} ${e.name}  +${e.additions} -${e.deletions}`;
+            });
+            let text = "--- Activity Rankings ---\n" + activityLines.join("\n");
+            if (diffLines.length > 0) {
+              text += "\n\n--- Line Changes ---\n" + diffLines.join("\n");
+            }
+            addMessage({ type: "system", text });
+          }
+          return;
+        }
         if (cmd === "help") {
           addMessage({
             type: "system",
-            text: "Commands: /copy (copy room code), /end (leave room), /export (save chat), /filter (toggle tool calls), /help (this message), /quit (exit)",
+            text: "Commands: /copy (copy room code), /end (leave room), /export (save chat), /filter (toggle tool calls), /help (this message), /quit (exit), /stats (activity rankings)",
           });
           return;
         }

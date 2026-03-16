@@ -3,6 +3,7 @@
 # ///
 
 import asyncio
+import hmac
 import websockets
 from websockets import ConnectionClosed
 from urllib.parse import parse_qs, urlparse
@@ -31,7 +32,7 @@ async def handler(websocket):
         ROOMS[room] = set()
         USERS[room] = {}
         PASSWORDS[room] = password
-    elif PASSWORDS.get(room, "") != password:
+    elif not hmac.compare_digest(PASSWORDS.get(room, ""), password):
         await websocket.send("__auth_fail__")
         await websocket.close(4001, "Invalid password")
         return
