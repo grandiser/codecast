@@ -147,7 +147,7 @@ export const installHooks = (cwd: string, room: string, host: string = 'localhos
     };
 
     // Add hooks for each event type we care about
-    for (const event of ["UserPromptSubmit", "PostToolUse"]) {
+    for (const event of ["UserPromptSubmit", "PostToolUse", "Stop"]) {
         if (!settings.hooks[event]) {
             settings.hooks[event] = [];
         }

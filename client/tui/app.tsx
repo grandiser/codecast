@@ -706,7 +706,7 @@ const useHandlers = () => {
   // Per-user activity counters — always updated, independent of /filter
   const statsMap = useRef(new Map<string, { prompts: number; toolCalls: number; additions: number; deletions: number }>());
 
-  // Accumulate line changes per user between prompts — flushed as diff_summary on next prompt
+  // Accumulate line changes per user — flushed as diff_summary when agent stops
   const pendingDiffs = useRef(new Map<string, { additions: number; deletions: number }>());
 
   const trackStats = useCallback((msg: Omit<EventMessage, "id" | "timestamp">) => {
@@ -761,13 +761,15 @@ const useHandlers = () => {
           pendingDiffs.current.set(parsed.user, pending);
         }
         addMessage({ type: "tool_call", user, text: parsed.text, toolName: parsed.tool_name, additions: additions || undefined, deletions: deletions || undefined });
-      } else {
-        // prompt — flush pending diffs as a summary
+      } else if (parsed.type === "stop") {
+        // Agent finished — flush pending diffs as a summary
         const pending = pendingDiffs.current.get(parsed.user);
         if (pending && (pending.additions || pending.deletions)) {
           addMessage({ type: "diff_summary", user, text: "", additions: pending.additions, deletions: pending.deletions });
           pendingDiffs.current.delete(parsed.user);
         }
+      } else {
+        // prompt
         addMessage({ type: "prompt", user, text: parsed.text });
       }
     };

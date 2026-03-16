@@ -66,6 +66,8 @@ async def send_event():
             msg["additions"] = additions
             msg["deletions"] = deletions
         message = json.dumps(msg)
+    elif hook_type == "Stop":
+        message = json.dumps({"type": "stop", "user": user})
     else:
         return  # unknown hook type, skip
 
