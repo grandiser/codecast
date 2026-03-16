@@ -77,7 +77,7 @@ interface User {
 
 interface EventMessage {
   id: string;
-  type: "join" | "leave" | "prompt" | "tool_call" | "chat" | "system" | "diff_summary";
+  type: "join" | "leave" | "prompt" | "tool_call" | "chat" | "system" | "diff_summary" | "git";
   toolName?: string;
   user?: User;
   text: string;
@@ -435,6 +435,26 @@ const EventItem: React.FC<{ event: EventMessage }> = ({ event }) => {
         </Text>
       );
 
+    case "git":
+      return (
+        <Text wrap="wrap">
+          <Text dimColor>[{time}] </Text>
+          <Text color={event.user?.color} bold>
+            {event.user?.avatar} {event.user?.name}
+          </Text>
+          <Text dimColor> {"\u2192"} git: </Text>
+          <Text bold>{event.text}</Text>
+          {(event.additions || event.deletions) ? (
+            <>
+              <Text> </Text>
+              {event.additions ? <Text color="green" bold>+{event.additions}</Text> : null}
+              {event.additions && event.deletions ? <Text> </Text> : null}
+              {event.deletions ? <Text color="red" bold>-{event.deletions}</Text> : null}
+            </>
+          ) : null}
+        </Text>
+      );
+
     case "system":
       return (
         <Text dimColor>
@@ -606,7 +626,7 @@ const SessionScreen: React.FC<{
 
   return (
   <Box flexDirection="column" flexGrow={1}>
-    <Box borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box borderStyle="round" borderColor="yellow" paddingX={1}>
       <HeaderBar roomCode={roomCode} users={users} uptime={uptime} />
     </Box>
     <Box
@@ -761,6 +781,8 @@ const useHandlers = () => {
           pendingDiffs.current.set(parsed.user, pending);
         }
         addMessage({ type: "tool_call", user, text: parsed.text, toolName: parsed.tool_name, additions: additions || undefined, deletions: deletions || undefined });
+      } else if (parsed.type === "git") {
+        addMessage({ type: "git", user, text: parsed.text, additions: parsed.additions || undefined, deletions: parsed.deletions || undefined });
       } else if (parsed.type === "stop") {
         // Agent finished — flush pending diffs as a summary
         const pending = pendingDiffs.current.get(parsed.user);
