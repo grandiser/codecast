@@ -746,6 +746,7 @@ const useHandlers = () => {
         wireSocket(ws);
         installHooks(process.cwd(), opts.room, opts.host, opts.password);
         setMessages([]);
+        setUsers([getUser(username)]);
         setUptime(0);
         opts.onSuccess?.();
         setScreen("session");
