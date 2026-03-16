@@ -626,7 +626,7 @@ const SessionScreen: React.FC<{
 
   return (
   <Box flexDirection="column" flexGrow={1}>
-    <Box borderStyle="round" borderColor="yellow" paddingX={1}>
+    <Box borderStyle="round" borderColor="cyan" paddingX={1}>
       <HeaderBar roomCode={roomCode} users={users} uptime={uptime} />
     </Box>
     <Box
