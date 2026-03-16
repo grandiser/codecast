@@ -1,6 +1,6 @@
 # codecast
 
-See your team code, live. Watch Claude Code prompts, tool calls, and file edits stream across your terminal as teammates work.
+See your team code, live. Watch prompts, tool calls, and file edits stream across your terminal as teammates work.
 
 ```
  ___ ___   __| | ___  ___ __ _ ___| |_
