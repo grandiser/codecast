@@ -32,6 +32,12 @@ async def send_event():
         return
 
     event = json.loads(raw)
+    # Debug: log raw event to see what fields are available
+    try:
+        with open("/tmp/codecast_hook_debug.log", "a") as f:
+            f.write(json.dumps(event, indent=2, default=str)[:2000] + "\n---\n")
+    except Exception:
+        pass
     hook_type = event.get("hook_event_name", "")
     prompt = event.get("prompt", "")
 
