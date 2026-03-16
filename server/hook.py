@@ -5,16 +5,9 @@
 
 import sys
 import json
-import re
 import asyncio
 import websockets
 from urllib.parse import quote
-
-def parse_git_stat(output):
-    """Parse 'X insertions(+), Y deletions(-)' from git output."""
-    a = re.search(r'(\d+) insertions?\(\+\)', output)
-    d = re.search(r'(\d+) deletions?\(-\)', output)
-    return (int(a.group(1)) if a else 0, int(d.group(1)) if d else 0)
 
 async def send_event():
     # Room info is passed as command-line args by the hook command
@@ -66,22 +59,9 @@ async def send_event():
             text = f"Write {tool_input.get('file_path', '?')}"
         elif tool == "Bash":
             cmd = tool_input.get("command", "?")
-            cmd_lower = cmd.strip().lower()
-            if cmd_lower.startswith("git commit"):
-                result = event.get("tool_response", {})
-                if isinstance(result, dict):
-                    result = result.get("stdout", "") or str(result)
-                a, d = parse_git_stat(str(result))
-                git_msg = {"type": "git", "user": user, "text": "Committed"}
-                if a: git_msg["additions"] = a
-                if d: git_msg["deletions"] = d
-                message = json.dumps(git_msg)
-            elif cmd_lower.startswith("git push"):
-                message = json.dumps({"type": "git", "user": user, "text": "Pushed"})
-            else:
-                if len(cmd) > 80:
-                    cmd = cmd[:80] + "..."
-                text = f"Bash: {cmd}"
+            if len(cmd) > 80:
+                cmd = cmd[:80] + "..."
+            text = f"Bash: {cmd}"
         elif tool == "Grep":
             text = f"Grep '{tool_input.get('pattern', '?')}'"
         elif tool == "Glob":
