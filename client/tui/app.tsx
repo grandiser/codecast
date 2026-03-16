@@ -160,7 +160,7 @@ const WelcomeScreen: React.FC<{
           {ASCII_LOGO}
         </Text>
         <Box marginTop={1}>
-          <Text dimColor>see your team prompt, in real time.</Text>
+          <Text dimColor>see your team code, in real time.</Text>
         </Box>
         <Box marginTop={1}>
           <SelectInput
