@@ -3,9 +3,9 @@ import { Text, Box, useInput, useApp, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import SelectInput from "ink-select-input";
-import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
+import { writeFileSync } from "fs";
 import { execSync } from "child_process";
-import { basename, join, relative } from "path";
+import { basename, relative } from "path";
 import { generateRoomCode, joinRoom, parseRoomCode, startServer, stopServer, startTunnel, stopTunnel, username, installHooks, uninstallHooks } from "../lib/room.js";
 import type WebSocket from "ws";
 
@@ -62,7 +62,6 @@ const COMMANDS = [
   { name: "/filter", desc: "toggle tool call visibility" },
   { name: "/heatmap", desc: "show most-touched files" },
   { name: "/help", desc: "show commands" },
-  { name: "/leaderboard", desc: "all-time stats across sessions" },
   { name: "/quit", desc: "exit codecast" },
   { name: "/stats", desc: "show user activity rankings" },
   { name: "/summary", desc: "session summary" },
@@ -542,9 +541,16 @@ const InputBar: React.FC<{
   };
 
   const handleSubmit = (text: string) => {
-    // If a suggestion is selected, autocomplete it instead of submitting
+    // If a suggestion is highlighted, autocomplete it
     if (selIdx >= 0 && filtered[selIdx]) {
       setValue(filtered[selIdx].name);
+      setSelIdx(-1);
+      return;
+    }
+    // Auto-complete to top match if typing a partial command
+    if (filtered.length > 0 && filtered[0] && value !== filtered[0].name) {
+      onSubmit(filtered[0].name);
+      setValue("");
       setSelIdx(-1);
       return;
     }
@@ -1035,26 +1041,6 @@ const useHandlers = () => {
   }, [wireSocket, setupAuth]);
 
   const handleEnd = useCallback(() => {
-    // Persist stats for leaderboard before clearing
-    try {
-      const statsDir = join(process.cwd(), ".codecast");
-      const statsPath = join(statsDir, "stats.json");
-      let lb: { users: Record<string, { sessions: number; prompts: number; toolCalls: number; linesAdded: number; linesRemoved: number; lastSeen: string }> } = { users: {} };
-      try { lb = JSON.parse(readFileSync(statsPath, "utf-8")); } catch {}
-      for (const [name, s] of statsMap.current.entries()) {
-        const e = lb.users[name] ?? { sessions: 0, prompts: 0, toolCalls: 0, linesAdded: 0, linesRemoved: 0, lastSeen: "" };
-        e.sessions++;
-        e.prompts += s.prompts;
-        e.toolCalls += s.toolCalls;
-        e.linesAdded += s.additions;
-        e.linesRemoved += s.deletions;
-        e.lastSeen = new Date().toISOString();
-        lb.users[name] = e;
-      }
-      if (!existsSync(statsDir)) mkdirSync(statsDir, { recursive: true });
-      writeFileSync(statsPath, JSON.stringify(lb, null, 2) + "\n");
-    } catch {}
-
     if (socket) {
       intentionalClose.current = true;
       socket.close();
@@ -1213,41 +1199,10 @@ const useHandlers = () => {
           addMessage({ type: "system", text });
           return;
         }
-        if (cmd === "leaderboard") {
-          let lb: { users: Record<string, { sessions: number; prompts: number; toolCalls: number; linesAdded: number; linesRemoved: number; lastSeen: string }> } = { users: {} };
-          try {
-            lb = JSON.parse(readFileSync(join(process.cwd(), ".codecast", "stats.json"), "utf-8"));
-          } catch {}
-          // Merge current session stats
-          for (const [name, s] of statsMap.current.entries()) {
-            const e = lb.users[name] ?? { sessions: 0, prompts: 0, toolCalls: 0, linesAdded: 0, linesRemoved: 0, lastSeen: "" };
-            lb.users[name] = {
-              sessions: e.sessions + 1,
-              prompts: e.prompts + s.prompts,
-              toolCalls: e.toolCalls + s.toolCalls,
-              linesAdded: e.linesAdded + s.additions,
-              linesRemoved: e.linesRemoved + s.deletions,
-              lastSeen: new Date().toISOString(),
-            };
-          }
-          const entries = Object.entries(lb.users)
-            .map(([name, s]) => ({ name, total: s.prompts + s.toolCalls, ...s }))
-            .sort((a, b) => b.total - a.total);
-          if (entries.length === 0) {
-            addMessage({ type: "system", text: "No leaderboard data yet." });
-          } else {
-            const lines = entries.map((e, i) => {
-              const medal = i === 0 ? "\u{1F947}" : i === 1 ? "\u{1F948}" : i === 2 ? "\u{1F949}" : `#${i + 1}`;
-              return `${medal} ${e.name}  ${e.sessions} sessions \u2502 ${e.prompts} prompts \u2502 ${e.toolCalls} tools \u2502 +${e.linesAdded} -${e.linesRemoved}`;
-            });
-            addMessage({ type: "system", text: "--- All-Time Leaderboard ---\n" + lines.join("\n") });
-          }
-          return;
-        }
         if (cmd === "help") {
           addMessage({
             type: "system",
-            text: "Commands: /copy (room code), /end (leave), /export (save chat), /filter (toggle tools), /heatmap (file activity), /help (this), /leaderboard (all-time stats), /quit (exit), /stats (session rankings), /summary (session overview)",
+            text: "Commands: /copy (room code), /end (leave), /export (save chat), /filter (toggle tools), /heatmap (file activity), /help (this), /quit (exit), /stats (session rankings), /summary (session overview)",
           });
           return;
         }
