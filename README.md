@@ -1,6 +1,6 @@
 # codecast
 
-See your team code, live. Watch prompts, tool calls, and edits stream across your terminal in real time.
+See your team code live — prompts, tool calls, and edits streaming across terminals in real time.
 
 ```
  ___ ___   __| | ___  ___ __ _ ___| |_

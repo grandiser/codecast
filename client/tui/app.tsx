@@ -1134,7 +1134,7 @@ const App: React.FC = () => {
   const visibleMessages = useMemo(() =>
     showToolCalls
       ? messages
-      : messages.filter((m) => m.type !== "tool_call"),
+      : messages.filter((m) => m.type !== "tool_call" || m.toolName === "Edit" || m.toolName === "Write"),
     [messages, showToolCalls]
   );
 

@@ -68,7 +68,7 @@ async def send_event():
             cmd = tool_input.get("command", "?")
             cmd_lower = cmd.strip().lower()
             if cmd_lower.startswith("git commit"):
-                result = event.get("tool_result", "")
+                result = event.get("tool_response", {})
                 if isinstance(result, dict):
                     result = result.get("stdout", "") or str(result)
                 a, d = parse_git_stat(str(result))
@@ -100,8 +100,10 @@ async def send_event():
         return  # unknown hook type, skip
 
     # Send to relay — use wss for remote hosts, ws for localhost
-    protocol = "ws" if host.startswith("localhost") else "wss"
-    uri = f"{protocol}://{host}?room={room}&user={user}_hook&password={quote(password, safe='')}"
+    # Replace "localhost" with "127.0.0.1" to avoid Windows DNS resolution flakiness
+    connect_host = host.replace("localhost", "127.0.0.1")
+    protocol = "ws" if host.startswith("localhost") or host.startswith("127.0.0.1") else "wss"
+    uri = f"{protocol}://{connect_host}?room={room}&user={user}_hook&password={quote(password, safe='')}"
     try:
         async with websockets.connect(uri) as ws:
             auth = await asyncio.wait_for(ws.recv(), timeout=5)

@@ -114,7 +114,7 @@ interface ClaudeSettings {
     permissions?: Record<string, unknown>;
     hooks?: Record<string, Array<{
         matcher: string;
-        hooks: Array<{ type: string; command: string; _marker?: string }>;
+        hooks: Array<{ type: string; command?: string }>;
     }>>;
     [key: string]: unknown;
 }
@@ -141,9 +141,8 @@ export const installHooks = (cwd: string, room: string, host: string = 'localhos
     const hookCommand = `cd ${esc(serverPath)} && uv run hook.py ${esc(room)} ${esc(host)} ${esc(username)} ${esc(password)}`;
 
     const codecastHook = {
-        type: "command",
-        command: hookCommand,
-        _marker: HOOK_MARKER,
+        type: "command" as const,
+        command: hookCommand + ` # ${HOOK_MARKER}`,
     };
 
     // Add hooks for each event type we care about
@@ -156,7 +155,7 @@ export const installHooks = (cwd: string, room: string, host: string = 'localhos
 
         // Remove any existing codecast hooks
         for (const entry of entries) {
-            entry.hooks = entry.hooks.filter(h => h._marker !== HOOK_MARKER);
+            entry.hooks = entry.hooks.filter(h => !h.command?.includes(HOOK_MARKER));
         }
 
         // Find an entry with empty matcher, or create one
@@ -196,7 +195,7 @@ export const uninstallHooks = (cwd: string) => {
         const entries = settings.hooks[event]!;
         for (const entry of entries) {
             const before = entry.hooks.length;
-            entry.hooks = entry.hooks.filter(h => h._marker !== HOOK_MARKER);
+            entry.hooks = entry.hooks.filter(h => !h.command?.includes(HOOK_MARKER));
             if (entry.hooks.length !== before) changed = true;
         }
         // Clean up empty entries
