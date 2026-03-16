@@ -5,7 +5,7 @@ import Spinner from "ink-spinner";
 import SelectInput from "ink-select-input";
 import { writeFileSync } from "fs";
 import { execSync } from "child_process";
-import { basename } from "path";
+import { basename, relative } from "path";
 import { generateRoomCode, joinRoom, parseRoomCode, startServer, stopServer, startTunnel, stopTunnel, username, installHooks, uninstallHooks } from "../lib/room.js";
 import type WebSocket from "ws";
 
@@ -60,9 +60,11 @@ const COMMANDS = [
   { name: "/end", desc: "leave room" },
   { name: "/export", desc: "save chat to file" },
   { name: "/filter", desc: "toggle tool call visibility" },
+  { name: "/heatmap", desc: "show most-touched files" },
   { name: "/help", desc: "show commands" },
   { name: "/quit", desc: "exit codecast" },
   { name: "/stats", desc: "show user activity rankings" },
+  { name: "/summary", desc: "session summary" },
 ];
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -77,7 +79,7 @@ interface User {
 
 interface EventMessage {
   id: string;
-  type: "join" | "leave" | "prompt" | "tool_call" | "chat" | "system" | "diff_summary" | "git";
+  type: "join" | "leave" | "prompt" | "tool_call" | "chat" | "system" | "diff_summary" | "git" | "warning";
   toolName?: string;
   user?: User;
   text: string;
@@ -455,6 +457,13 @@ const EventItem: React.FC<{ event: EventMessage }> = ({ event }) => {
         </Text>
       );
 
+    case "warning":
+      return (
+        <Text color="yellow" wrap="wrap">
+          [{time}] {"\u26A0"} {event.text}
+        </Text>
+      );
+
     case "system":
       return (
         <Text dimColor>
@@ -475,7 +484,8 @@ const HeaderBar: React.FC<{
   roomCode: string;
   users: User[];
   uptime: number;
-}> = ({ roomCode, users, uptime }) => (
+  workingUsers: Set<string>;
+}> = ({ roomCode, users, uptime, workingUsers }) => (
   <Box justifyContent="space-between" width="100%">
     <Box>
       <Text bold color="cyan">
@@ -492,6 +502,9 @@ const HeaderBar: React.FC<{
           <Text color={u.color}>
             {u.avatar} {u.name}
           </Text>
+          {workingUsers.has(u.name) ? (
+            <Text color={u.color}>{" "}<Spinner type="dots" /></Text>
+          ) : null}
         </Text>
       ))}
     </Box>
@@ -528,9 +541,16 @@ const InputBar: React.FC<{
   };
 
   const handleSubmit = (text: string) => {
-    // If a suggestion is selected, autocomplete it instead of submitting
+    // If a suggestion is highlighted, autocomplete it
     if (selIdx >= 0 && filtered[selIdx]) {
       setValue(filtered[selIdx].name);
+      setSelIdx(-1);
+      return;
+    }
+    // Auto-complete to top match if typing a partial command
+    if (filtered.length > 0 && filtered[0] && value !== filtered[0].name) {
+      onSubmit(filtered[0].name);
+      setValue("");
       setSelIdx(-1);
       return;
     }
@@ -592,7 +612,8 @@ const SessionScreen: React.FC<{
   messages: EventMessage[];
   uptime: number;
   onInput: (text: string) => void;
-}> = ({ roomCode, users, messages, uptime, onInput }) => {
+  workingUsers: Set<string>;
+}> = ({ roomCode, users, messages, uptime, onInput, workingUsers }) => {
   const { stdout } = useStdout();
   const rows = stdout?.rows ?? 24;
   const maxVisible = Math.max(5, rows - 9);
@@ -627,7 +648,7 @@ const SessionScreen: React.FC<{
   return (
   <Box flexDirection="column" flexGrow={1}>
     <Box borderStyle="round" borderColor="cyan" paddingX={1}>
-      <HeaderBar roomCode={roomCode} users={users} uptime={uptime} />
+      <HeaderBar roomCode={roomCode} users={users} uptime={uptime} workingUsers={workingUsers} />
     </Box>
     <Box
       borderStyle="round"
@@ -694,6 +715,48 @@ const useHandlers = () => {
   const colorMap = useRef(new Map<string, UserColor>());
   const nextColorIdx = useRef(0);
   const intentionalClose = useRef(false);
+
+  // Working indicator
+  const [workingUsers, setWorkingUsers] = useState(new Set<string>());
+  const workingTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const WORKING_TIMEOUT = 3 * 60 * 1000; // 3 min auto-idle
+
+  const markWorking = useCallback((name: string) => {
+    setWorkingUsers(prev => {
+      if (prev.has(name)) return prev;
+      const next = new Set(prev);
+      next.add(name);
+      return next;
+    });
+    const existing = workingTimers.current.get(name);
+    if (existing) clearTimeout(existing);
+    workingTimers.current.set(name, setTimeout(() => {
+      setWorkingUsers(prev => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+      workingTimers.current.delete(name);
+    }, WORKING_TIMEOUT));
+  }, []);
+
+  const markIdle = useCallback((name: string) => {
+    setWorkingUsers(prev => {
+      if (!prev.has(name)) return prev;
+      const next = new Set(prev);
+      next.delete(name);
+      return next;
+    });
+    const existing = workingTimers.current.get(name);
+    if (existing) clearTimeout(existing);
+    workingTimers.current.delete(name);
+  }, []);
+
+  // File tracking: heatmap + conflict detection
+  const fileHeatmap = useRef(new Map<string, { count: number; users: Set<string>; additions: number; deletions: number }>());
+  const fileEditors = useRef(new Map<string, Map<string, number>>()); // file -> Map<user, lastTouch>
+  const conflictAlerted = useRef(new Set<string>()); // "file:userA:userB" already warned
+  const CONFLICT_WINDOW = 5 * 60 * 1000; // 5 minutes
 
   const getUser = useCallback((name: string): User => {
     const avatar = getAvatar(name);
@@ -772,6 +835,7 @@ const useHandlers = () => {
       if (typeof parsed.user !== "string" || typeof parsed.text !== "string") return;
       const user = getUser(parsed.user);
       if (parsed.type === "tool_call") {
+        markWorking(parsed.user);
         const additions = parsed.additions ?? 0;
         const deletions = parsed.deletions ?? 0;
         if (additions || deletions) {
@@ -780,10 +844,41 @@ const useHandlers = () => {
           pending.deletions += deletions;
           pendingDiffs.current.set(parsed.user, pending);
         }
+        // Track file activity for heatmap + conflict detection
+        const filePath = parsed.file as string | undefined;
+        if (filePath) {
+          const relPath = filePath.startsWith(process.cwd())
+            ? relative(process.cwd(), filePath) || filePath
+            : filePath;
+          // Heatmap
+          const hm = fileHeatmap.current.get(relPath) ?? { count: 0, users: new Set(), additions: 0, deletions: 0 };
+          hm.count++;
+          hm.users.add(parsed.user);
+          if (additions) hm.additions += additions;
+          if (deletions) hm.deletions += deletions;
+          fileHeatmap.current.set(relPath, hm);
+          // Conflict detection (Edit/Write only)
+          if (parsed.tool_name === "Edit" || parsed.tool_name === "Write") {
+            const now = Date.now();
+            const editors = fileEditors.current.get(relPath) ?? new Map<string, number>();
+            for (const [otherUser, lastTouch] of editors) {
+              if (otherUser !== parsed.user && now - lastTouch < CONFLICT_WINDOW) {
+                const key = [relPath, ...[parsed.user, otherUser].sort()].join(":");
+                if (!conflictAlerted.current.has(key)) {
+                  conflictAlerted.current.add(key);
+                  addMessage({ type: "warning", text: `${parsed.user} and ${otherUser} are both editing ${relPath}` });
+                }
+              }
+            }
+            editors.set(parsed.user, now);
+            fileEditors.current.set(relPath, editors);
+          }
+        }
         addMessage({ type: "tool_call", user, text: parsed.text, toolName: parsed.tool_name, additions: additions || undefined, deletions: deletions || undefined });
       } else if (parsed.type === "git") {
         addMessage({ type: "git", user, text: parsed.text, additions: parsed.additions || undefined, deletions: parsed.deletions || undefined });
       } else if (parsed.type === "stop") {
+        markIdle(parsed.user);
         // Agent finished — flush pending diffs as a summary
         const pending = pendingDiffs.current.get(parsed.user);
         if (pending && (pending.additions || pending.deletions)) {
@@ -792,6 +887,7 @@ const useHandlers = () => {
         }
       } else {
         // prompt
+        markWorking(parsed.user);
         addMessage({ type: "prompt", user, text: parsed.text });
       }
     };
@@ -849,7 +945,7 @@ const useHandlers = () => {
       addMessage({ type: "system", text: "Session ended by host. Exiting..." });
       setTimeout(() => process.exit(0), 2000);
     });
-  }, [addMessage, getUser]);
+  }, [addMessage, getUser, markWorking, markIdle]);
 
   const setupAuth = useCallback((ws: WebSocket, opts: {
     room: string; host: string; password: string;
@@ -965,6 +1061,12 @@ const useHandlers = () => {
     nextColorIdx.current = 0;
     statsMap.current.clear();
     pendingDiffs.current.clear();
+    setWorkingUsers(new Set());
+    for (const t of workingTimers.current.values()) clearTimeout(t);
+    workingTimers.current.clear();
+    fileHeatmap.current.clear();
+    fileEditors.current.clear();
+    conflictAlerted.current.clear();
   }, [socket, isHost]);
 
   const handleExport = useCallback(() => {
@@ -1050,10 +1152,57 @@ const useHandlers = () => {
           }
           return;
         }
+        if (cmd === "heatmap") {
+          const files = Array.from(fileHeatmap.current.entries())
+            .map(([path, h]) => ({ path, ...h, userList: Array.from(h.users) }))
+            .sort((a, b) => b.count - a.count);
+          if (files.length === 0) {
+            addMessage({ type: "system", text: "No file activity yet." });
+          } else {
+            const maxCount = files[0]!.count;
+            const maxBarLen = 20;
+            const lines = files.slice(0, 15).map((f) => {
+              const barLen = Math.max(1, Math.round((f.count / maxCount) * maxBarLen));
+              const bar = "\u2588".repeat(barLen);
+              const changes = (f.additions || f.deletions)
+                ? ` +${f.additions} -${f.deletions}`
+                : "";
+              return `${bar} ${f.path} (${f.count}x by ${f.userList.join(", ")})${changes}`;
+            });
+            addMessage({ type: "system", text: "--- File Heatmap ---\n" + lines.join("\n") });
+          }
+          return;
+        }
+        if (cmd === "summary") {
+          const totalPrompts = Array.from(statsMap.current.values()).reduce((s, e) => s + e.prompts, 0);
+          const totalTools = Array.from(statsMap.current.values()).reduce((s, e) => s + e.toolCalls, 0);
+          const totalAdded = Array.from(statsMap.current.values()).reduce((s, e) => s + e.additions, 0);
+          const totalRemoved = Array.from(statsMap.current.values()).reduce((s, e) => s + e.deletions, 0);
+          const userCount = statsMap.current.size;
+          const filesChanged = Array.from(fileHeatmap.current.entries())
+            .filter(([, h]) => h.additions > 0 || h.deletions > 0).length;
+          const topFiles = Array.from(fileHeatmap.current.entries())
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 5)
+            .map(([p, h]) => `  ${p} (${h.count}x)`);
+
+          const perUser = Array.from(statsMap.current.entries())
+            .sort((a, b) => (b[1].prompts + b[1].toolCalls) - (a[1].prompts + a[1].toolCalls))
+            .map(([name, s]) => `  ${name}: ${s.prompts} prompts, ${s.toolCalls} tools, +${s.additions} -${s.deletions}`);
+
+          let text = `--- Session Summary ---\n`;
+          text += `Duration: ${formatUptime(uptime)}\n`;
+          text += `Users: ${userCount} \u2502 Prompts: ${totalPrompts} \u2502 Tool calls: ${totalTools}\n`;
+          text += `Lines: +${totalAdded} -${totalRemoved} \u2502 Files changed: ${filesChanged}\n`;
+          if (topFiles.length > 0) text += `\nTop files:\n${topFiles.join("\n")}\n`;
+          if (perUser.length > 0) text += `\nPer user:\n${perUser.join("\n")}`;
+          addMessage({ type: "system", text });
+          return;
+        }
         if (cmd === "help") {
           addMessage({
             type: "system",
-            text: "Commands: /copy (copy room code), /end (leave room), /export (save chat), /filter (toggle tool calls), /help (this message), /quit (exit), /stats (activity rankings)",
+            text: "Commands: /copy (room code), /end (leave), /export (save chat), /filter (toggle tools), /heatmap (file activity), /help (this), /quit (exit), /stats (session rankings), /summary (session overview)",
           });
           return;
         }
@@ -1068,7 +1217,7 @@ const useHandlers = () => {
         socket.send(input);
       }
     },
-    [addMessage, handleEnd, handleExport, socket, showToolCalls]
+    [addMessage, handleEnd, handleExport, socket, showToolCalls, uptime]
   );
 
   // Stable ref so InputBar never re-renders from upstream state changes.
@@ -1095,6 +1244,7 @@ const useHandlers = () => {
     handleEnd,
     handleCommand: stableHandleCommand,
     showToolCalls,
+    workingUsers,
   };
 };
 
@@ -1129,6 +1279,7 @@ const App: React.FC = () => {
     handleJoin,
     handleCommand,
     showToolCalls,
+    workingUsers,
   } = useHandlers();
 
   const visibleMessages = useMemo(() =>
@@ -1193,6 +1344,7 @@ const App: React.FC = () => {
           messages={visibleMessages}
           uptime={uptime}
           onInput={handleCommand}
+          workingUsers={workingUsers}
         />
       );
     case "error":

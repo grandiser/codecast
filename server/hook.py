@@ -73,6 +73,9 @@ async def send_event():
             if additions or deletions:
                 msg["additions"] = additions
                 msg["deletions"] = deletions
+            file_path = tool_input.get("file_path", "")
+            if file_path:
+                msg["file"] = file_path
             message = json.dumps(msg)
     elif hook_type == "Stop":
         message = json.dumps({"type": "stop", "user": user})
