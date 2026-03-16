@@ -481,20 +481,13 @@ const HeaderBar: React.FC<{
 
 // ─── Message Feed ───────────────────────────────────────────────────────────
 
-const MessageFeed: React.FC<{ messages: EventMessage[] }> = ({ messages }) => {
-  const { stdout } = useStdout();
-  const rows = stdout?.rows ?? 24;
-  const maxVisible = Math.max(5, rows - 8);
-  const visible = messages.slice(-maxVisible);
-
-  return (
-    <Box flexDirection="column" flexGrow={1}>
-      {visible.map((msg) => (
-        <EventItem key={msg.id} event={msg} />
-      ))}
-    </Box>
-  );
-};
+const MessageFeed: React.FC<{ messages: EventMessage[] }> = ({ messages }) => (
+  <Box flexDirection="column" flexGrow={1}>
+    {messages.map((msg) => (
+      <EventItem key={msg.id} event={msg} />
+    ))}
+  </Box>
+);
 
 // ─── Input Bar ──────────────────────────────────────────────────────────────
 
@@ -530,9 +523,9 @@ const InputBar: React.FC<{
 
   useInput((_input, key) => {
     if (filtered.length === 0) return;
-    if (key.downArrow) {
+    if (key.downArrow && !key.shift) {
       setSelIdx((i) => (i + 1) % filtered.length);
-    } else if (key.upArrow) {
+    } else if (key.upArrow && !key.shift) {
       setSelIdx((i) => (i - 1 + filtered.length) % filtered.length);
     } else if (key.tab) {
       if (selIdx >= 0 && filtered[selIdx]) {
@@ -581,10 +574,41 @@ const SessionScreen: React.FC<{
   onInput: (text: string) => void;
 }> = ({ roomCode, users, messages, uptime, onInput }) => {
   const { stdout } = useStdout();
-  const cols = (stdout?.columns ?? 80) - 4; // subtract border + padding
+  const rows = stdout?.rows ?? 24;
+  const maxVisible = Math.max(5, rows - 9);
+
+  // scrollBack = 0 means at bottom (latest messages visible)
+  const [scrollBack, setScrollBack] = useState(0);
+  const prevLen = useRef(messages.length);
+
+  // Keep scroll position stable when new messages arrive while scrolled up
+  useEffect(() => {
+    const added = messages.length - prevLen.current;
+    prevLen.current = messages.length;
+    if (added > 0) {
+      setScrollBack((prev) => (prev > 0 ? prev + added : 0));
+    }
+  }, [messages.length]);
+
+  const maxOffset = Math.max(0, messages.length - maxVisible);
+
+  useInput((_input, key) => {
+    if (key.upArrow && key.shift) {
+      setScrollBack((prev) => Math.min(prev + 1, maxOffset));
+    } else if (key.downArrow && key.shift) {
+      setScrollBack((prev) => Math.max(0, prev - 1));
+    }
+  });
+
+  const endIdx = messages.length - scrollBack;
+  const startIdx = Math.max(0, endIdx - maxVisible);
+  const visible = messages.slice(startIdx, endIdx || undefined);
 
   return (
   <Box flexDirection="column" flexGrow={1}>
+    <Box borderStyle="round" borderColor="cyan" paddingX={1}>
+      <HeaderBar roomCode={roomCode} users={users} uptime={uptime} />
+    </Box>
     <Box
       borderStyle="round"
       borderColor="cyan"
@@ -592,10 +616,11 @@ const SessionScreen: React.FC<{
       flexGrow={1}
       paddingX={1}
     >
-      <HeaderBar roomCode={roomCode} users={users} uptime={uptime} />
-      <Text dimColor>{"─".repeat(cols)}</Text>
+      {scrollBack > 0 && (
+        <Text dimColor>{"\u2191"} {scrollBack} more above — Shift+{"\u2191"}/{"\u2193"} to scroll</Text>
+      )}
       <Box flexDirection="column" flexGrow={1}>
-        <MessageFeed messages={messages} />
+        <MessageFeed messages={visible} />
       </Box>
     </Box>
     <InputBar onSubmit={onInput} />
