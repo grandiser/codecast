@@ -157,7 +157,7 @@ const WelcomeScreen: React.FC<{
           {ASCII_LOGO}
         </Text>
         <Box marginTop={1}>
-          <Text dimColor>see your team code, in real-time.</Text>
+          <Text dimColor>see your team prompt, in real time.</Text>
         </Box>
         <Box marginTop={1}>
           <SelectInput
@@ -475,26 +475,56 @@ const InputBar: React.FC<{
   onSubmit: (text: string) => void;
 }> = React.memo(({ onSubmit }) => {
   const [value, setValue] = useState("");
-
-  const handleSubmit = (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    onSubmit(trimmed);
-    setValue("");
-  };
+  const [selIdx, setSelIdx] = useState(-1);
 
   const showSuggestions = value.startsWith("/") && !value.includes(" ");
   const filtered = showSuggestions
     ? COMMANDS.filter((c) => c.name.startsWith(value))
     : [];
 
+  const handleChange = (v: string) => {
+    setValue(v);
+    setSelIdx(-1);
+  };
+
+  const handleSubmit = (text: string) => {
+    // If a suggestion is selected, autocomplete it instead of submitting
+    if (selIdx >= 0 && filtered[selIdx]) {
+      setValue(filtered[selIdx].name);
+      setSelIdx(-1);
+      return;
+    }
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    onSubmit(trimmed);
+    setValue("");
+    setSelIdx(-1);
+  };
+
+  useInput((_input, key) => {
+    if (filtered.length === 0) return;
+    if (key.downArrow) {
+      setSelIdx((i) => (i + 1) % filtered.length);
+    } else if (key.upArrow) {
+      setSelIdx((i) => (i - 1 + filtered.length) % filtered.length);
+    } else if (key.tab) {
+      if (selIdx >= 0 && filtered[selIdx]) {
+        setValue(filtered[selIdx].name);
+        setSelIdx(-1);
+      } else if (filtered.length === 1 && filtered[0]) {
+        setValue(filtered[0].name);
+        setSelIdx(-1);
+      }
+    }
+  });
+
   return (
     <Box flexDirection="column">
       {filtered.length > 0 && (
         <Box flexDirection="column" paddingX={1} marginBottom={0}>
-          {filtered.map((c) => (
+          {filtered.map((c, i) => (
             <Box key={c.name}>
-              <Text color="cyan" bold>{c.name}</Text>
+              <Text color="cyan" bold inverse={i === selIdx}>{c.name}</Text>
               <Text dimColor>  {c.desc}</Text>
             </Box>
           ))}
@@ -504,7 +534,7 @@ const InputBar: React.FC<{
         <Text color="cyan">{"> "}</Text>
         <TextInput
           value={value}
-          onChange={setValue}
+          onChange={handleChange}
           onSubmit={handleSubmit}
           placeholder="type a message or /command..."
           focus={true}
