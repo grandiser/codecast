@@ -348,71 +348,69 @@ const ConnectingScreen: React.FC<{ subtitle: string }> = ({ subtitle }) => (
 
 // ─── Event Item ─────────────────────────────────────────────────────────────
 
+const DISPLAY_TRUNCATE = 500;
+
+const truncateDisplay = (text: string): string =>
+  text.length > DISPLAY_TRUNCATE ? text.slice(0, DISPLAY_TRUNCATE) + "..." : text;
+
 const EventItem: React.FC<{ event: EventMessage }> = ({ event }) => {
   const time = formatTime(event.timestamp);
 
   switch (event.type) {
     case "join":
       return (
-        <Box>
-          <Text dimColor>
-            [{time}] -- {event.user?.avatar} {event.user?.name} joined --
-          </Text>
-        </Box>
+        <Text dimColor>
+          [{time}] -- {event.user?.avatar} {event.user?.name} joined --
+        </Text>
       );
 
     case "leave":
       return (
-        <Box>
-          <Text dimColor>
-            [{time}] -- {event.user?.avatar} {event.user?.name} left --
-          </Text>
-        </Box>
+        <Text dimColor>
+          [{time}] -- {event.user?.avatar} {event.user?.name} left --
+        </Text>
       );
 
     case "prompt":
       return (
-        <Box>
+        <Text wrap="wrap">
           <Text dimColor>[{time}] </Text>
           <Text color={event.user?.color} bold>
             {event.user?.avatar} {event.user?.name}
           </Text>
-          <Text dimColor> {"\u2192"} Prompt:
-          </Text>
-          <Text> {event.text}</Text>
-        </Box>
+          <Text dimColor> {"\u2192"} Prompt: </Text>
+          <Text>{truncateDisplay(event.text)}</Text>
+        </Text>
       );
 
     case "tool_call":
       return (
-        <Box>
+        <Text wrap="wrap">
           <Text dimColor>[{time}] </Text>
           <Text color={event.user?.color} bold>
             {event.user?.avatar} {event.user?.name}
           </Text>
           <Text dimColor> {"\u2192"} </Text>
-          <Text>{event.text}</Text>
-        </Box>
+          <Text>{truncateDisplay(event.text)}</Text>
+        </Text>
       );
 
     case "chat":
       return (
-        <Box>
+        <Text wrap="wrap">
           <Text dimColor>[{time}] </Text>
           <Text color={event.user?.color} bold>
             {event.user?.avatar} {event.user?.name}
           </Text>
-          <Text>: {event.text}</Text>
-        </Box>
+          <Text>: {truncateDisplay(event.text)}</Text>
+        </Text>
       );
 
     case "system":
       return (
-        <Box>
-          <Text dimColor>
-            [{time}] {event.text}
-          </Text>
-        </Box>
+        <Text dimColor>
+          [{time}] {event.text}
+        </Text>
       );
 
     default:

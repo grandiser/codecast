@@ -30,10 +30,7 @@ async def send_event():
 
     # Build message based on hook type
     if hook_type == "UserPromptSubmit" and prompt:
-        # Truncate long prompts
         text = prompt.strip().replace("\n", " ")
-        if len(text) > 100:
-            text = text[:100] + "..."
         message = json.dumps({"type": "prompt", "user": user, "text": text})
     elif hook_type == "PostToolUse":
         tool = event.get("tool_name", "unknown")
