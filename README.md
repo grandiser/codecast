@@ -4,7 +4,8 @@ See your team code, in real-time. Watch Claude Code prompts, tool calls, and fil
 
 | | |
 |---|---|
-| ![Screenshot 1](screenshots/screenshot1.png) | ![Screenshot 2](screenshots/screenshot2.png) |
+| <img width="738" height="392" alt="landing" src="https://github.com/user-attachments/assets/2cf7de53-d668-4d92-aa1b-a99884a1c69e" />
+ | ![Screenshot 2](screenshots/screenshot2.png) |
 | ![Screenshot 3](screenshots/screenshot3.png) | ![Screenshot 4](screenshots/screenshot4.png) |
 
 ## Prerequisites
