@@ -2,12 +2,10 @@
 
 See your team code, in real-time. Watch Claude Code prompts, tool calls, and file edits stream across your terminal as teammates work.
 
-```
- ___ ___   __| | ___  ___ __ _ ___| |_
-/ __/ _ \ / _` |/ _ \/ __/ _` / __| __|
-| (_| (_) | (_| |  __/ (_| (_| \__ \ |_
-\___\___/ \__,_|\___|\___\__,_|___/\__|
-```
+| | |
+|---|---|
+| ![Screenshot 1](screenshots/screenshot1.png) | ![Screenshot 2](screenshots/screenshot2.png) |
+| ![Screenshot 3](screenshots/screenshot3.png) | ![Screenshot 4](screenshots/screenshot4.png) |
 
 ## Prerequisites
 
